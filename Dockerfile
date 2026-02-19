@@ -61,7 +61,4 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 COPY --from=build /app/deps /
 COPY --from=build /app/bin /
 
-# SPI device access is simpler as root in containerized deployments.
-USER root
-
 ENTRYPOINT ["/rangehood"]

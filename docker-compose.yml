@@ -3,7 +3,6 @@ services:
     build: .
     # image: stakach/rangehood:latest
     container_name: elica-rangehood-matter
-    user: "0:0"
     network_mode: host
     restart: unless-stopped
     devices:
