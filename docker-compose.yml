@@ -1,0 +1,19 @@
+services:
+  elica-rangehood-matter:
+    # build: .
+    image: stakach/rangehood:latest
+    container_name: elica-rangehood-matter
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      GPIO_PIN: ${GPIO_PIN:-17}
+      REPEATS: ${REPEATS:-5}
+      TOGGLE_LIGHT: ${TOGGLE_LIGHT:-00 00 00 00 00 01 FE B5}
+      FAN_UP: ${FAN_UP:-00 00 00 00 00 01 FE 97}
+      FAN_DOWN: ${FAN_DOWN:-00 00 00 00 00 01 FE 90}
+      FAN_OFF: ${FAN_OFF:-00 00 00 00 00 01 FE 95}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10mb"
+        max-file: "1"
