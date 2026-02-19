@@ -73,6 +73,8 @@ Environment variables:
 - `FAN_UP` (default: `00 00 00 00 00 01 FE 97`)
 - `FAN_DOWN` (default: `00 00 00 00 00 01 FE 90`)
 - `FAN_OFF` (default: `00 00 00 00 00 01 FE 95`)
+- `MATTER_STORAGE_FILE` (default: `data/elica_rangehood_matter_storage.json`)
+- `LOG_LEVEL` (default: `info`)
 
 Example:
 
@@ -96,6 +98,8 @@ Run the container:
 docker run --rm \
   --network host \
   --device /dev/spidev0.0:/dev/spidev0.0 \
+  -v "$(pwd)/data:/data" \
+  -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.json \
   elica-rangehood-matter
 ```
 

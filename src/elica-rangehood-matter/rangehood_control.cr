@@ -1,7 +1,16 @@
 require "./came_protocol"
 require "./waveform_player"
 
+module Elica::Rangehood::Actuator
+  abstract def toggle_light : Nil
+  abstract def fan_up : Nil
+  abstract def fan_down : Nil
+  abstract def fan_off : Nil
+end
+
 class Elica::Rangehood::Control
+  include Elica::Rangehood::Actuator
+
   getter wave_player : WavePlayer
   getter repeats : Int32
   getter code_bits : Int32
@@ -33,23 +42,23 @@ class Elica::Rangehood::Control
     @fan_off = CAME::Frame.new(fan_off_hex, @code_bits)
   end
 
-  def toggle_light
+  def toggle_light : Nil
     wave_player.play(@toggle_light.pulses, repeats)
   end
 
-  def fan_up
+  def fan_up : Nil
     wave_player.play(@fan_up.pulses, repeats)
   end
 
-  def fan_down
+  def fan_down : Nil
     wave_player.play(@fan_down.pulses, repeats)
   end
 
-  def fan_off
+  def fan_off : Nil
     wave_player.play(@fan_off.pulses, repeats)
   end
 
-  def perform(action : String)
+  def perform(action : String) : Nil
     case action
     when "toggle_light" then toggle_light
     when "fan_up"       then fan_up

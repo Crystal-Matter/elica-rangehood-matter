@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     devices:
       - ${SPI_DEVICE:-/dev/spidev0.0}:${SPI_DEVICE:-/dev/spidev0.0}
+    volumes:
+      - ./data:/data
     environment:
       SPI_DEVICE: ${SPI_DEVICE:-/dev/spidev0.0}
       SPI_SPEED_HZ: ${SPI_SPEED_HZ:-50000}
@@ -16,6 +18,8 @@ services:
       FAN_UP: ${FAN_UP:-00 00 00 00 00 01 FE 97}
       FAN_DOWN: ${FAN_DOWN:-00 00 00 00 00 01 FE 90}
       FAN_OFF: ${FAN_OFF:-00 00 00 00 00 01 FE 95}
+      MATTER_STORAGE_FILE: ${MATTER_STORAGE_FILE:-/data/elica_rangehood_matter_storage.json}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     logging:
       driver: json-file
       options:
