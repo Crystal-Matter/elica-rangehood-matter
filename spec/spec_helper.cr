@@ -1,2 +1,2 @@
 require "spec"
-require "../src/elica-rangehood-matter"
+require "../src/elica-rangehood-matter/came_protocol"

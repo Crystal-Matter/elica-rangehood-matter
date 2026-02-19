@@ -1,4 +1,4 @@
-require "./waveform_player"
+require "./waveform_pulse"
 
 # CAME protocol encoder
 module CAME

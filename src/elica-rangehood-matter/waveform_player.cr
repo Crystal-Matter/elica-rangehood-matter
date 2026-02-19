@@ -1,7 +1,6 @@
 # Protocol-agnostic waveform player
 require "./lib_pigpiod"
-
-record Pulse, level : Bool, us : UInt32
+require "./waveform_pulse"
 
 class WavePlayer
   @daemon : PigpioDaemon
