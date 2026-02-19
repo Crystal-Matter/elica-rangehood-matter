@@ -1,2 +1,6 @@
 require "spec"
 require "../src/elica-rangehood-matter/came_protocol"
+require "../src/elica-rangehood-matter/spi_device"
+require "../src/elica-rangehood-matter/cc1101"
+require "../src/elica-rangehood-matter/waveform_player"
+require "../src/elica-rangehood-matter/rangehood_control"

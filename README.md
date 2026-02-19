@@ -1,38 +1,47 @@
 # elica-rangehood-matter
 
 `elica-rangehood-matter` emulates a 433MHz remote control for Elica range hoods.
-It generates RF pulse trains on a Raspberry Pi via `pigpiod_if2` and is designed to be exposed through Matter for iOS/Home control.
+It transmits OOK/ASK RF packets through a CC1101 connected to Raspberry Pi SPI and is designed to be exposed through Matter for iOS/Home control.
 
 ## Hardware
 
-- Raspberry Pi with accessible GPIO
-- 433MHz ASK/OOK transmitter connected to GPIO (default: `GPIO17`)
+- Raspberry Pi 5
+- CC1101 transceiver module (433MHz variant recommended)
 - Compatible Elica range hood that uses the matching remote protocol
 
 ## Wiring (example)
 
-Example wiring for a common 433MHz transmitter module (e.g. FS1000A-style):
+Example wiring for CC1101 on Raspberry Pi SPI0 (`/dev/spidev0.0`):
 
-| Signal | Transmitter pin | Raspberry Pi pin |
+| Signal | CC1101 pin | Raspberry Pi pin |
 |---|---|---|
-| Power | `VCC` | `5V` (physical pin `2` or `4`) |
+| Power | `VCC` | `3.3V` (physical pin `1`) |
 | Ground | `GND` | `GND` (physical pin `6`) |
-| Data | `DATA` / `ATAD` | `GPIO17` (BCM `17`, physical pin `11`) |
+| SPI Clock | `SCK` | `GPIO11` (SCLK, physical pin `23`) |
+| SPI MOSI | `MOSI` | `GPIO10` (MOSI, physical pin `19`) |
+| SPI MISO | `MISO` | `GPIO9` (MISO, physical pin `21`) |
+| Chip Select | `CSN` | `GPIO8` (CE0, physical pin `24`) |
+| Optional GPIO | `GDO0` | `GPIO25` (physical pin `22`) |
 
 Notes:
 
-- Raspberry Pi GPIO is `3.3V` logic only. Do not feed `5V` into any GPIO pin.
-- Keep ground shared between the Pi and transmitter.
+- CC1101 is `3.3V` only. Do not power it from `5V`.
+- Keep wiring short and ground shared.
 - A short wire antenna (about `17.3 cm`, quarter-wave at 433MHz) often improves range.
 
 ## Prerequisites
 
-Install pigpio and start the daemon:
+Enable SPI on Raspberry Pi:
 
 ```bash
-sudo apt update
-sudo apt install pigpio
-sudo systemctl enable --now pigpiod
+sudo raspi-config nonint do_spi 0
+sudo reboot
+```
+
+Verify SPI device is present after reboot:
+
+```bash
+ls -l /dev/spidev0.0
 ```
 
 ## Build
@@ -44,12 +53,22 @@ shards build --production --release --error-trace
 
 The executable will be at `./bin/rangehood`.
 
+## Usage
+
+This will launch the matter service
+
+```bash
+./bin/rangehood
+```
+
 ## Configuration
 
 Environment variables:
 
-- `GPIO_PIN` (default: `17`)
+- `SPI_DEVICE` (default: `/dev/spidev0.0`)
+- `SPI_SPEED_HZ` (default: `50000`)
 - `REPEATS` (default: `5`)
+- `CODE_BITS` (default: `18`)
 - `TOGGLE_LIGHT` (default: `00 00 00 00 00 01 FE B5`)
 - `FAN_UP` (default: `00 00 00 00 00 01 FE 97`)
 - `FAN_DOWN` (default: `00 00 00 00 00 01 FE 90`)
@@ -58,7 +77,7 @@ Environment variables:
 Example:
 
 ```bash
-GPIO_PIN=17 REPEATS=6 ./bin/rangehood
+SPI_DEVICE=/dev/spidev0.0 SPI_SPEED_HZ=50000 REPEATS=6 ./bin/rangehood
 ```
 
 ## Docker
@@ -74,10 +93,18 @@ docker buildx build --platform linux/arm64 --tag stakach/rangehood:latest --push
 Run the container:
 
 ```bash
-docker run --rm --network host elica-rangehood-matter
+docker run --rm \
+  --network host \
+  --device /dev/spidev0.0:/dev/spidev0.0 \
+  --user root \
+  elica-rangehood-matter
 ```
 
-Because the app connects to `pigpiod` at `localhost:8888`, use host networking on Linux (or run `pigpiod` in the same network namespace).
+Or with compose:
+
+```bash
+docker compose up -d
+```
 
 ## Development
 
@@ -85,6 +112,12 @@ Run tests:
 
 ```bash
 crystal spec
+```
+
+Run linter:
+
+```bash
+./bin/ameba
 ```
 
 ## Contributing

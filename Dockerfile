@@ -1,24 +1,9 @@
 FROM crystallang/crystal:1 AS build
 WORKDIR /app
 
-# Create a non-privileged user, defaults are appuser:10001
-ARG IMAGE_UID="10001"
-ENV UID=$IMAGE_UID
-ENV USER=appuser
-
-RUN groupadd --gid "${UID}" "${USER}" \
-  && useradd \
-    --uid "${UID}" \
-    --gid "${UID}" \
-    --home-dir "/nonexistent" \
-    --shell "/usr/sbin/nologin" \
-    --no-create-home \
-    "${USER}"
-
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 
-# Install Crystal build dependencies and pigpio client libraries.
-# On Raspberry Pi OS this is usually "apt install pigpio".
+# Install Crystal build dependencies.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     autoconf \
@@ -40,11 +25,6 @@ RUN apt-get update \
     pkg-config \
     tzdata \
     zlib1g-dev \
-  && if [ "$(apt-cache policy pigpio | awk '/Candidate:/ {print $2}')" != "(none)" ]; then \
-       apt-get install -y --no-install-recommends pigpio; \
-     else \
-       apt-get install -y --no-install-recommends libpigpiod-if-dev libpigpiod-if2-1 pigpio-tools; \
-     fi \
   && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -71,10 +51,6 @@ FROM scratch
 WORKDIR /
 ENV PATH=$PATH:/
 
-# Copy the user information over
-COPY --from=build /etc/passwd /etc/passwd
-COPY --from=build /etc/group /etc/group
-
 # Required for networking, TLS and timezone support
 COPY --from=build /etc/hosts /etc/hosts
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
@@ -85,7 +61,7 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 COPY --from=build /app/deps /
 COPY --from=build /app/bin /
 
-# Use an unprivileged user.
-USER appuser:appuser
+# SPI device access is simpler as root in containerized deployments.
+USER root
 
 ENTRYPOINT ["/rangehood"]

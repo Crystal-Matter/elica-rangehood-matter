@@ -5,11 +5,17 @@ module CAME
   T_US   =   320_u32 # Base timing unit
   GAP_US = 16500_u32 # Inter-frame gap (~52T, matches real capture)
 
-  def self.parse_key(hex_key : String, num_bits : Int32) : UInt32
+  def self.parse_key(hex_key : String, num_bits : Int32) : UInt64
+    raise "num_bits must be between 1 and 64 (got #{num_bits})" unless (1..64).includes?(num_bits)
+
     clean = hex_key.gsub(" ", "").strip
-    value = clean.to_u64(16)
-    mask = (1_u64 << num_bits) - 1
-    (value & mask).to_u32
+    value = clean.empty? ? 0_u64 : clean.to_u64(16)
+    mask = if num_bits == 64
+             UInt64::MAX
+           else
+             (1_u64 << num_bits) - 1
+           end
+    value & mask
   end
 
   # Encode a single CAME frame as a sequence of logical pulses.
@@ -26,7 +32,9 @@ module CAME
   #
   # The frame ends HIGH after the last bit's HIGH phase. The receiver
   # sees the next frame's leading LOW gap as the delimiter.
-  def self.encode(code : UInt32, num_bits : Int32) : Array(Pulse)
+  def self.encode(code : UInt64, num_bits : Int32) : Array(Pulse)
+    raise "num_bits must be >= 1 (got #{num_bits})" if num_bits < 1
+
     pulses = [] of Pulse
 
     # Inter-frame gap (LOW). On the first frame this is a cold start;
@@ -38,7 +46,7 @@ module CAME
 
     # Data bits, MSB first. Each bit is (LOW, HIGH).
     (num_bits - 1).downto(0) do |i|
-      if (code >> i) & 1 == 1
+      if ((code >> i) & 1_u64) == 1_u64
         # Bit 1: LOW 2T, HIGH 1T
         pulses << Pulse.new(level: false, us: T_US * 2)
         pulses << Pulse.new(level: true, us: T_US)

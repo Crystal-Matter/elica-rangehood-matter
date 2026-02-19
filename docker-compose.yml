@@ -1,13 +1,18 @@
 services:
   elica-rangehood-matter:
-    # build: .
-    image: stakach/rangehood:latest
+    build: .
+    # image: stakach/rangehood:latest
     container_name: elica-rangehood-matter
+    user: "0:0"
     network_mode: host
     restart: unless-stopped
+    devices:
+      - ${SPI_DEVICE:-/dev/spidev0.0}:${SPI_DEVICE:-/dev/spidev0.0}
     environment:
-      GPIO_PIN: ${GPIO_PIN:-17}
+      SPI_DEVICE: ${SPI_DEVICE:-/dev/spidev0.0}
+      SPI_SPEED_HZ: ${SPI_SPEED_HZ:-50000}
       REPEATS: ${REPEATS:-5}
+      CODE_BITS: ${CODE_BITS:-18}
       TOGGLE_LIGHT: ${TOGGLE_LIGHT:-00 00 00 00 00 01 FE B5}
       FAN_UP: ${FAN_UP:-00 00 00 00 00 01 FE 97}
       FAN_DOWN: ${FAN_DOWN:-00 00 00 00 00 01 FE 90}

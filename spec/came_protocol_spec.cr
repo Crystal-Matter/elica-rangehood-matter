@@ -3,18 +3,27 @@ require "./spec_helper"
 describe CAME do
   describe ".parse_key" do
     it "parses hex with spaces and masks to the requested bit length" do
-      CAME.parse_key("FF FF", 8).should eq(0xFF_u32)
-      CAME.parse_key("FF FF", 4).should eq(0x0F_u32)
+      CAME.parse_key("FF FF", 8).should eq(0xFF_u64)
+      CAME.parse_key("FF FF", 4).should eq(0x0F_u64)
     end
 
     it "ignores surrounding whitespace" do
-      CAME.parse_key("  0A  ", 8).should eq(0x0A_u32)
+      CAME.parse_key("  0A  ", 8).should eq(0x0A_u64)
+    end
+
+    it "supports 64-bit keys" do
+      CAME.parse_key("FF FF FF FF FF FF FF FF", 64).should eq(UInt64::MAX)
+    end
+
+    it "rejects invalid bit lengths" do
+      expect_raises(Exception, /num_bits/) { CAME.parse_key("01", 0) }
+      expect_raises(Exception, /num_bits/) { CAME.parse_key("01", 65) }
     end
   end
 
   describe ".encode" do
     it "generates the expected pulse sequence for mixed bits (MSB first)" do
-      pulses = CAME.encode(0b10_u32, 2)
+      pulses = CAME.encode(0b10_u64, 2)
 
       pulses.size.should eq(6)
       pulses[0].should eq(Pulse.new(level: false, us: CAME::GAP_US))
@@ -31,7 +40,7 @@ describe CAME do
 
     it "includes gap + start + 2 pulses per data bit" do
       num_bits = 5
-      pulses = CAME.encode(0_u32, num_bits)
+      pulses = CAME.encode(0_u64, num_bits)
 
       pulses.size.should eq(2 + (num_bits * 2))
       pulses[0].should eq(Pulse.new(level: false, us: CAME::GAP_US))
@@ -45,7 +54,7 @@ describe CAME do
 
       frame.key_hex.should eq("0F")
       frame.num_bits.should eq(4)
-      frame.pulses.should eq(CAME.encode(0x0F_u32, 4))
+      frame.pulses.should eq(CAME.encode(0x0F_u64, 4))
       frame.size.should eq(10)
     end
   end
