@@ -96,7 +96,6 @@ Run the container:
 docker run --rm \
   --network host \
   --device /dev/spidev0.0:/dev/spidev0.0 \
-  --user root \
   elica-rangehood-matter
 ```
 
