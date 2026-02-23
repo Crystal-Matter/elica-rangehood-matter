@@ -7,7 +7,7 @@ It transmits OOK/ASK RF packets through a CC1101 connected to Raspberry Pi SPI a
 
 - Raspberry Pi 5
 - CC1101 transceiver module (433MHz variant recommended)
-- Compatible Elica range hood that uses the matching remote protocol
+- Compatible Elica range hood that uses the matching remote protocol (you can capture codes for your device using a flipper zero)
 
 ## Wiring (example)
 
