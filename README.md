@@ -15,19 +15,20 @@ Example wiring for CC1101 on Raspberry Pi SPI0 (`/dev/spidev0.0`):
 
 | Signal | CC1101 pin | Raspberry Pi pin |
 |---|---|---|
-| Power | `VCC` | `3.3V` (physical pin `1`) |
-| Ground | `GND` | `GND` (physical pin `6`) |
-| SPI Clock | `SCK` | `GPIO11` (SCLK, physical pin `23`) |
-| SPI MOSI | `MOSI` | `GPIO10` (MOSI, physical pin `19`) |
-| SPI MISO | `MISO` | `GPIO9` (MISO, physical pin `21`) |
-| Chip Select | `CSN` | `GPIO8` (CE0, physical pin `24`) |
-| Optional GPIO | `GDO0` | `GPIO25` (physical pin `22`) |
+| Ground | 1 `GND` | `GND` (physical pin `6`) |
+| Power | 2 `VCC` | `3.3V` (physical pin `1`) |
+| Optional GPIO | 3 `GDO0` | `GPIO25` (physical pin `22`) |
+| Chip Select | 4 `CSN` | `GPIO8` (CE0, physical pin `24`) |
+| SPI Clock | 5 `SCK` | `GPIO11` (SCLK, physical pin `23`) |
+| SPI MOSI | 6 `MOSI` | `GPIO10` (MOSI, physical pin `19`) |
+| SPI MISO | 7 `MISO` | `GPIO9` (MISO, physical pin `21`) |
 
 Notes:
 
 - CC1101 is `3.3V` only. Do not power it from `5V`.
 - Keep wiring short and ground shared.
 - A short wire antenna (about `17.3 cm`, quarter-wave at 433MHz) often improves range.
+- Part no. E07-M1101D (433M V2.0)
 
 ## Prerequisites
 
