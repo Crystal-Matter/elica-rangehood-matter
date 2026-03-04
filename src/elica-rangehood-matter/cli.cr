@@ -15,6 +15,7 @@ class Elica::Rangehood::CLI
     property fan_off : String
     property storage_file : String
     property log_level : String
+    property? hardware_test : Bool
 
     def initialize
       @spi_device = env_string("SPI_DEVICE", "/dev/spidev0.0")
@@ -27,6 +28,7 @@ class Elica::Rangehood::CLI
       @fan_off = env_string("FAN_OFF", "00 00 00 00 00 01 FE 95")
       @storage_file = env_string("MATTER_STORAGE_FILE", Elica::Rangehood::MatterDevice::STORAGE_FILE_DEFAULT)
       @log_level = env_string("LOG_LEVEL", "info")
+      @hardware_test = false
     end
 
     private def env_string(name : String, default : String) : String
@@ -69,6 +71,7 @@ class Elica::Rangehood::CLI
       opts.on("--fan-off=HEX", "CAME key for fan off") { |value| config.fan_off = value }
       opts.on("--storage=PATH", "Matter storage path (default #{config.storage_file})") { |value| config.storage_file = value }
       opts.on("--log-level=LEVEL", "Log level: debug|info|warn|error (default #{config.log_level})") { |value| config.log_level = value.downcase }
+      opts.on("--hardware-test", "Run hardware diagnostics and exit") { config.hardware_test = true }
       opts.on("-h", "--help", "Show help") do
         puts opts
         exit 0
@@ -76,11 +79,20 @@ class Elica::Rangehood::CLI
     end
 
     configure_logging(config.log_level)
+    if config.hardware_test?
+      run_hardware_test(config)
+      return
+    end
+
     Log.info do
       "starting service spi_device=#{config.spi_device} spi_speed_hz=#{config.spi_speed_hz} " \
       "repeats=#{config.repeats} code_bits=#{config.code_bits} storage=#{config.storage_file}"
     end
 
+    run_service(config)
+  end
+
+  private def self.run_service(config : Config) : Nil
     spi = SpiDevice.new(config.spi_device, config.spi_speed_hz)
     begin
       radio = CC1101.new(spi)
@@ -112,6 +124,90 @@ class Elica::Rangehood::CLI
     ensure
       spi.close
     end
+  end
+
+  private def self.run_hardware_test(config : Config) : Nil
+    puts "Hardware test mode enabled"
+    puts "SPI device: #{config.spi_device}"
+    puts "SPI speed (Hz): #{config.spi_speed_hz}"
+    puts ""
+
+    started_at = Time.instant
+    spi : SpiDevice? = nil
+    begin
+      spi = SpiDevice.new(config.spi_device, config.spi_speed_hz)
+      spi_device = spi.as(SpiDevice)
+      puts "[1/8] SPI device opened"
+
+      radio = CC1101.new(spi_device)
+      puts "[2/8] CC1101 driver initialized"
+
+      radio.reset
+      puts "[3/8] CC1101 reset command sent"
+
+      partnum = radio.partnum
+      raise "unexpected PARTNUM 0x#{hex_u8(partnum)} (expected 0x#{hex_u8(CC1101::EXPECTED_PARTNUM)})" if partnum != CC1101::EXPECTED_PARTNUM
+
+      version = radio.version
+      current_state = radio.state
+      puts "[4/8] CC1101 detected (PARTNUM=0x#{hex_u8(partnum)}, VERSION=0x#{hex_u8(version)}, state=0x#{hex_u8(current_state)})"
+
+      radio.configure_ook_433
+      puts "[5/8] CC1101 configured for OOK 433.92MHz"
+
+      assert_register(radio, CC1101::FREQ2, 0x10_u8, "FREQ2")
+      assert_register(radio, CC1101::FREQ1, 0xB0_u8, "FREQ1")
+      assert_register(radio, CC1101::FREQ0, 0x71_u8, "FREQ0")
+      assert_register(radio, CC1101::MDMCFG2, 0x30_u8, "MDMCFG2")
+      puts "[6/8] CC1101 register readback passed"
+
+      validate_came_config("toggle-light", config.toggle_light, config.code_bits)
+      validate_came_config("fan-up", config.fan_up, config.code_bits)
+      validate_came_config("fan-down", config.fan_down, config.code_bits)
+      validate_came_config("fan-off", config.fan_off, config.code_bits)
+      puts "[7/8] CAME frame parsing/encoding passed"
+
+      wave_player = WavePlayer.new(radio)
+      diagnostic_pulses = [
+        Pulse.new(level: false, us: CAME::T_US),
+        Pulse.new(level: true, us: CAME::T_US),
+        Pulse.new(level: false, us: CAME::T_US * 2),
+        Pulse.new(level: true, us: CAME::T_US),
+        Pulse.new(level: false, us: CAME::GAP_US),
+      ]
+      wave_player.play(diagnostic_pulses, 1)
+      puts "[8/8] Waveform encoding/transmit test packet sent"
+
+      elapsed_ms = (Time.instant - started_at).total_milliseconds
+      puts ""
+      puts "[PASS] Hardware diagnostics completed in #{elapsed_ms.round(1)} ms"
+    rescue ex
+      puts ""
+      puts "[FAIL] Hardware diagnostics failed: #{ex.message}"
+      if trace = ex.backtrace?
+        trace.first(8).each { |line| puts "  #{line}" }
+      end
+      exit 1
+    ensure
+      spi.try &.close
+      puts "SPI device closed" if spi
+    end
+  end
+
+  private def self.validate_came_config(label : String, key : String, code_bits : Int32) : Nil
+    frame = CAME::Frame.new(key, code_bits)
+    raise "#{label} CAME pulse sequence is empty" if frame.pulses.empty?
+  end
+
+  private def self.assert_register(radio : CC1101, address : UInt8, expected : UInt8, name : String) : Nil
+    actual = radio.read_reg(address)
+    return if actual == expected
+
+    raise "#{name} readback mismatch: expected 0x#{hex_u8(expected)}, got 0x#{hex_u8(actual)}"
+  end
+
+  private def self.hex_u8(value : UInt8) : String
+    value.to_s(16).upcase.rjust(2, '0')
   end
 
   private def self.configure_logging(log_level : String) : Nil

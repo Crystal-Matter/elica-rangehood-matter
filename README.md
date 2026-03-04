@@ -29,6 +29,7 @@ Notes:
 - Keep wiring short and ground shared.
 - A short wire antenna (about `17.3 cm`, quarter-wave at 433MHz) often improves range.
 - Part no. E07-M1101D (433M V2.0)
+- Runtime defaults in this project are tuned for E07-M1101D (CC1101 + 26MHz crystal) on `433.92MHz` OOK.
 
 ## Prerequisites
 
@@ -62,6 +63,17 @@ This will launch the matter service
 ./bin/rangehood
 ```
 
+Run hardware diagnostics and exit:
+
+```bash
+./bin/rangehood --hardware-test
+```
+
+The hardware test prints each initialization step, verifies CC1101 chip identity (`PARTNUM`/`VERSION`), validates CC1101 register readback, validates CAME frame parsing, sends a short diagnostic RF packet, and exits with:
+
+- `0` on success (`[PASS]`)
+- `1` on failure (`[FAIL]` with stack trace lines)
+
 ## Configuration
 
 Environment variables:
@@ -76,6 +88,8 @@ Environment variables:
 - `FAN_OFF` (default: `00 00 00 00 00 01 FE 95`)
 - `MATTER_STORAGE_FILE` (default: `data/elica_rangehood_matter_storage.json`)
 - `LOG_LEVEL` (default: `info`)
+
+Use `LOG_LEVEL=debug` when troubleshooting RF transmission to see packet-level logs from `Control`, `WavePlayer`, and `CC1101`.
 
 Example:
 
@@ -103,6 +117,20 @@ docker run --rm \
   -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.json \
   elica-rangehood-matter
 ```
+
+Run only the hardware diagnostics in Docker (recommended first when debugging startup):
+
+```bash
+docker run --rm \
+  --network host \
+  --device /dev/spidev0.0:/dev/spidev0.0 \
+  -v "$(pwd)/data:/data" \
+  -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.json \
+  -e LOG_LEVEL=debug \
+  elica-rangehood-matter --hardware-test
+```
+
+If the container exits immediately, this mode will show which initialization step failed.
 
 Or with compose:
 

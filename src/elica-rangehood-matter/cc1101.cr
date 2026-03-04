@@ -1,4 +1,5 @@
 require "./spi_device"
+require "log"
 
 module RadioTransmitter
   abstract def transmit(data : Slice(UInt8))
@@ -7,6 +8,7 @@ end
 # Minimal CC1101 driver for OOK transmission on 433.92 MHz.
 class CC1101
   include RadioTransmitter
+  Log = ::Log.for("elica_rangehood.cc1101")
 
   # Strobe commands
   SRES  = 0x30_u8
@@ -35,7 +37,11 @@ class CC1101
   PATABLE = 0x3E_u8
 
   # Status register (read via burst bit)
+  PARTNUM   = 0xF0_u8
+  VERSION   = 0xF1_u8
   MARCSTATE = 0xF5_u8 # 0xC0 (status) | 0x35
+
+  EXPECTED_PARTNUM = 0x00_u8
 
   # MARCSTATE values
   MARCSTATE_IDLE             = 0x01_u8
@@ -86,6 +92,14 @@ class CC1101
     read_reg(MARCSTATE) & 0x1F
   end
 
+  def partnum : UInt8
+    read_reg(PARTNUM)
+  end
+
+  def version : UInt8
+    read_reg(VERSION)
+  end
+
   # Configure for 433.92 MHz OOK transmission at 25 kBaud.
   # Each FIFO bit maps to ~40us of RF output.
   def configure_ook_433
@@ -127,6 +141,8 @@ class CC1101
   def transmit(data : Slice(UInt8))
     raise "TX data too large: #{data.size} bytes (max 64)" if data.size > 64
 
+    Log.debug { "cc1101 tx start bytes=#{data.size}" }
+
     idle
     strobe(SFTX)
 
@@ -135,16 +151,27 @@ class CC1101
 
     strobe(STX)
 
+    completed = false
     500.times do
       sleep 200.microseconds
       current = state
-      return if current == MARCSTATE_IDLE
+      if current == MARCSTATE_IDLE
+        completed = true
+        break
+      end
       if current == MARCSTATE_TXFIFO_UNDERFLOW
         strobe(SFTX)
+        Log.warn { "cc1101 tx fifo underflow bytes=#{data.size}" }
         raise "TX FIFO underflow"
       end
     end
 
+    if completed
+      Log.debug { "cc1101 tx complete bytes=#{data.size}" }
+      return
+    end
+
+    Log.warn { "cc1101 tx timeout bytes=#{data.size}" }
     raise "TX timeout"
   end
 end

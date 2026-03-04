@@ -1,5 +1,6 @@
 require "./came_protocol"
 require "./waveform_player"
+require "log"
 
 module Elica::Rangehood::Actuator
   abstract def toggle_light : Nil
@@ -10,6 +11,7 @@ end
 
 class Elica::Rangehood::Control
   include Elica::Rangehood::Actuator
+  Log = ::Log.for("elica_rangehood.control")
 
   getter wave_player : WavePlayer
   getter repeats : Int32
@@ -43,19 +45,19 @@ class Elica::Rangehood::Control
   end
 
   def toggle_light : Nil
-    wave_player.play(@toggle_light.pulses, repeats)
+    transmit_frame("toggle_light", @toggle_light)
   end
 
   def fan_up : Nil
-    wave_player.play(@fan_up.pulses, repeats)
+    transmit_frame("fan_up", @fan_up)
   end
 
   def fan_down : Nil
-    wave_player.play(@fan_down.pulses, repeats)
+    transmit_frame("fan_down", @fan_down)
   end
 
   def fan_off : Nil
-    wave_player.play(@fan_off.pulses, repeats)
+    transmit_frame("fan_off", @fan_off)
   end
 
   def perform(action : String) : Nil
@@ -67,5 +69,14 @@ class Elica::Rangehood::Control
     else
       raise "unknown action '#{action}', expected one of: toggle_light, fan_up, fan_down, fan_off"
     end
+  end
+
+  private def transmit_frame(action : String, frame : CAME::Frame) : Nil
+    Log.info { "rf transmit start action=#{action} repeats=#{repeats} pulses=#{frame.size}" }
+    wave_player.play(frame.pulses, repeats)
+    Log.info { "rf transmit complete action=#{action}" }
+  rescue ex
+    Log.error(exception: ex) { "rf transmit failed action=#{action}" }
+    raise ex
   end
 end

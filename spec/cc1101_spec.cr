@@ -33,6 +33,19 @@ describe CC1101 do
     spi.requests[1].should eq(Bytes[CC1101::FREQ1 | 0x80_u8, 0x00_u8])
   end
 
+  it "reads chip identity registers" do
+    spi = FakeSpi.new
+    spi.queue_response(Bytes[0_u8, CC1101::EXPECTED_PARTNUM])
+    spi.queue_response(Bytes[0_u8, 0x14_u8])
+    radio = CC1101.new(spi)
+
+    radio.partnum.should eq(CC1101::EXPECTED_PARTNUM)
+    radio.version.should eq(0x14_u8)
+
+    spi.requests[0].should eq(Bytes[CC1101::PARTNUM | 0x80_u8, 0x00_u8])
+    spi.requests[1].should eq(Bytes[CC1101::VERSION | 0x80_u8, 0x00_u8])
+  end
+
   it "raises when packet exceeds 64 bytes" do
     spi = FakeSpi.new
     radio = CC1101.new(spi)

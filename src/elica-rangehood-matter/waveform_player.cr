@@ -1,8 +1,11 @@
 # Protocol-agnostic waveform player
 require "./cc1101"
 require "./waveform_pulse"
+require "log"
 
 class WavePlayer
+  Log = ::Log.for("elica_rangehood.wave_player")
+
   # CC1101 transmit data rate is configured to ~25 kbps, so each data bit is ~40us.
   SYMBOL_US        = 40_u32
   MAX_PACKET_BYTES =     64
@@ -15,11 +18,21 @@ class WavePlayer
     raise "repeats must be >= 1" if repeats < 1
 
     packets = encode_packets(pulses)
-    repeats.times do
-      packets.each do |packet|
+    total_bytes = packets.sum(0, &.size)
+    Log.debug do
+      "encoded waveform pulses=#{pulses.size} packets=#{packets.size} packet_bytes=#{total_bytes} repeats=#{repeats}"
+    end
+
+    repeats.times do |repeat_index|
+      packets.each_with_index do |packet, packet_index|
+        Log.debug do
+          "tx packet repeat=#{repeat_index + 1}/#{repeats} packet=#{packet_index + 1}/#{packets.size} bytes=#{packet.size}"
+        end
         @radio.transmit(packet)
       end
     end
+
+    Log.debug { "waveform playback complete repeats=#{repeats}" }
   end
 
   private def encode_packets(pulses : Array(Pulse)) : Array(Bytes)
