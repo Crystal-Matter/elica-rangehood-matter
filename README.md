@@ -69,6 +69,12 @@ Run hardware diagnostics and exit:
 ./bin/rangehood --hardware-test
 ```
 
+Send inverted waveform polarity (for RF A/B testing):
+
+```bash
+./bin/rangehood --invert-waveform
+```
+
 The hardware test prints each initialization step, verifies CC1101 chip identity (`PARTNUM`/`VERSION`), validates CC1101 register readback, validates CAME frame parsing, sends a short diagnostic RF packet, and exits with:
 
 - `0` on success (`[PASS]`)
@@ -88,8 +94,10 @@ Environment variables:
 - `FAN_OFF` (default: `00 00 00 00 00 01 FE 95`)
 - `MATTER_STORAGE_FILE` (default: `data/elica_rangehood_matter_storage.json`)
 - `LOG_LEVEL` (default: `info`)
+- `INVERT_WAVEFORM` (default: `false`)
 
 Use `LOG_LEVEL=debug` when troubleshooting RF transmission to see packet-level logs from `Control`, `WavePlayer`, and `CC1101`.
+Action logs include `polarity=normal|inverted` for each Matter-triggered transmit.
 
 Example:
 

@@ -72,7 +72,10 @@ class Elica::Rangehood::Control
   end
 
   private def transmit_frame(action : String, frame : CAME::Frame) : Nil
-    Log.info { "rf transmit start action=#{action} repeats=#{repeats} pulses=#{frame.size}" }
+    Log.info do
+      "rf transmit start action=#{action} repeats=#{repeats} pulses=#{frame.size} " \
+      "polarity=#{wave_player.polarity.to_s.downcase}"
+    end
     wave_player.play(frame.pulses, repeats)
     Log.info { "rf transmit complete action=#{action}" }
   rescue ex

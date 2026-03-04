@@ -34,6 +34,19 @@ describe WavePlayer do
     radio.packets.should eq([Bytes[0xFF_u8], Bytes[0xFF_u8], Bytes[0xFF_u8]])
   end
 
+  it "can invert waveform levels before transmit" do
+    radio = FakeRadio.new
+    player = WavePlayer.new(radio, WavePlayer::Polarity::Inverted)
+
+    pulses = [
+      Pulse.new(level: true, us: 320_u32),
+      Pulse.new(level: false, us: 320_u32),
+    ]
+
+    player.play(pulses, 1)
+    radio.packets.should eq([Bytes[0x00_u8, 0xFF_u8]])
+  end
+
   it "splits payloads into 64-byte packets for CC1101 FIFO limits" do
     radio = FakeRadio.new
     player = WavePlayer.new(radio)

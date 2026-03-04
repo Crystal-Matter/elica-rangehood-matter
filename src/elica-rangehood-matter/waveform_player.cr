@@ -6,21 +6,30 @@ require "log"
 class WavePlayer
   Log = ::Log.for("elica_rangehood.wave_player")
 
+  enum Polarity
+    Normal
+    Inverted
+  end
+
   # CC1101 transmit data rate is configured to ~25 kbps, so each data bit is ~40us.
   SYMBOL_US        = 40_u32
   MAX_PACKET_BYTES =     64
 
-  def initialize(@radio : RadioTransmitter)
+  getter polarity : Polarity
+
+  def initialize(@radio : RadioTransmitter, @polarity : Polarity = Polarity::Normal)
   end
 
   def play(pulses : Array(Pulse), repeats : Int32 = 1)
     raise "empty pulse sequence" if pulses.empty?
     raise "repeats must be >= 1" if repeats < 1
 
-    packets = encode_packets(pulses)
+    effective_pulses = polarity.inverted? ? invert_pulses(pulses) : pulses
+    packets = encode_packets(effective_pulses)
     total_bytes = packets.sum(0, &.size)
     Log.debug do
-      "encoded waveform pulses=#{pulses.size} packets=#{packets.size} packet_bytes=#{total_bytes} repeats=#{repeats}"
+      "encoded waveform pulses=#{effective_pulses.size} packets=#{packets.size} packet_bytes=#{total_bytes} " \
+      "repeats=#{repeats} polarity=#{polarity.to_s.downcase}"
     end
 
     repeats.times do |repeat_index|
@@ -32,7 +41,11 @@ class WavePlayer
       end
     end
 
-    Log.debug { "waveform playback complete repeats=#{repeats}" }
+    Log.debug { "waveform playback complete repeats=#{repeats} polarity=#{polarity.to_s.downcase}" }
+  end
+
+  private def invert_pulses(pulses : Array(Pulse)) : Array(Pulse)
+    pulses.map { |pulse| Pulse.new(level: !pulse.level, us: pulse.us) }
   end
 
   private def encode_packets(pulses : Array(Pulse)) : Array(Bytes)

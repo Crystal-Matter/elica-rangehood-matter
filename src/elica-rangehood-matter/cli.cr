@@ -16,6 +16,7 @@ class Elica::Rangehood::CLI
     property storage_file : String
     property log_level : String
     property? hardware_test : Bool
+    property? invert_waveform : Bool
 
     def initialize
       @spi_device = env_string("SPI_DEVICE", "/dev/spidev0.0")
@@ -29,6 +30,7 @@ class Elica::Rangehood::CLI
       @storage_file = env_string("MATTER_STORAGE_FILE", Elica::Rangehood::MatterDevice::STORAGE_FILE_DEFAULT)
       @log_level = env_string("LOG_LEVEL", "info")
       @hardware_test = false
+      @invert_waveform = env_bool("INVERT_WAVEFORM", false)
     end
 
     private def env_string(name : String, default : String) : String
@@ -41,6 +43,20 @@ class Elica::Rangehood::CLI
 
     private def env_u32(name : String, default : UInt32) : UInt32
       ENV[name]?.try(&.to_u32?) || default
+    end
+
+    private def env_bool(name : String, default : Bool) : Bool
+      value = ENV[name]?
+      return default unless value
+
+      case value.downcase
+      when "1", "true", "yes", "on"
+        true
+      when "0", "false", "no", "off"
+        false
+      else
+        default
+      end
     end
   end
 
@@ -71,6 +87,7 @@ class Elica::Rangehood::CLI
       opts.on("--fan-off=HEX", "CAME key for fan off") { |value| config.fan_off = value }
       opts.on("--storage=PATH", "Matter storage path (default #{config.storage_file})") { |value| config.storage_file = value }
       opts.on("--log-level=LEVEL", "Log level: debug|info|warn|error (default #{config.log_level})") { |value| config.log_level = value.downcase }
+      opts.on("--invert-waveform", "Invert waveform levels before RF transmit") { config.invert_waveform = true }
       opts.on("--hardware-test", "Run hardware diagnostics and exit") { config.hardware_test = true }
       opts.on("-h", "--help", "Show help") do
         puts opts
@@ -86,7 +103,8 @@ class Elica::Rangehood::CLI
 
     Log.info do
       "starting service spi_device=#{config.spi_device} spi_speed_hz=#{config.spi_speed_hz} " \
-      "repeats=#{config.repeats} code_bits=#{config.code_bits} storage=#{config.storage_file}"
+      "repeats=#{config.repeats} code_bits=#{config.code_bits} storage=#{config.storage_file} " \
+      "waveform_polarity=#{waveform_polarity(config).to_s.downcase}"
     end
 
     run_service(config)
@@ -99,8 +117,9 @@ class Elica::Rangehood::CLI
       radio.reset
       radio.configure_ook_433
 
+      wave_player = WavePlayer.new(radio, waveform_polarity(config))
       control = Elica::Rangehood::Control.new(
-        WavePlayer.new(radio),
+        wave_player,
         repeats: config.repeats,
         code_bits: config.code_bits,
         toggle_light_hex: config.toggle_light,
@@ -130,6 +149,7 @@ class Elica::Rangehood::CLI
     puts "Hardware test mode enabled"
     puts "SPI device: #{config.spi_device}"
     puts "SPI speed (Hz): #{config.spi_speed_hz}"
+    puts "Waveform polarity: #{waveform_polarity(config).to_s.downcase}"
     puts ""
 
     started_at = Time.instant
@@ -167,7 +187,7 @@ class Elica::Rangehood::CLI
       validate_came_config("fan-off", config.fan_off, config.code_bits)
       puts "[7/8] CAME frame parsing/encoding passed"
 
-      wave_player = WavePlayer.new(radio)
+      wave_player = WavePlayer.new(radio, waveform_polarity(config))
       diagnostic_pulses = [
         Pulse.new(level: false, us: CAME::T_US),
         Pulse.new(level: true, us: CAME::T_US),
@@ -208,6 +228,10 @@ class Elica::Rangehood::CLI
 
   private def self.hex_u8(value : UInt8) : String
     value.to_s(16).upcase.rjust(2, '0')
+  end
+
+  private def self.waveform_polarity(config : Config) : WavePlayer::Polarity
+    config.invert_waveform? ? WavePlayer::Polarity::Inverted : WavePlayer::Polarity::Normal
   end
 
   private def self.configure_logging(log_level : String) : Nil
