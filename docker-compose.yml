@@ -13,7 +13,7 @@ services:
     environment:
       SPI_DEVICE: ${SPI_DEVICE:-/dev/spidev0.0}
       SPI_SPEED_HZ: ${SPI_SPEED_HZ:-50000}
-      RF_FREQUENCY_HZ: ${RF_FREQUENCY_HZ:-433920000}
+      RF_FREQUENCY_HZ: ${RF_FREQUENCY_HZ:-433657070}
       RF_SYMBOL_US: ${RF_SYMBOL_US:-333}
       RF_BIT_ORDER: ${RF_BIT_ORDER:-msb}
       REPEATS: ${REPEATS:-5}
