@@ -11,13 +11,25 @@ class WavePlayer
     Inverted
   end
 
-  # CC1101 transmit data rate is configured to ~25 kbps, so each data bit is ~40us.
-  SYMBOL_US        = 40_u32
-  MAX_PACKET_BYTES =     64
+  enum BitOrder
+    MsbFirst
+    LsbFirst
+  end
+
+  DEFAULT_SYMBOL_US = 80_u32
+  MAX_PACKET_BYTES  =     64
 
   getter polarity : Polarity
+  getter bit_order : BitOrder
+  getter symbol_us : UInt32
 
-  def initialize(@radio : RadioTransmitter, @polarity : Polarity = Polarity::Normal)
+  def initialize(
+    @radio : RadioTransmitter,
+    @polarity : Polarity = Polarity::Normal,
+    @bit_order : BitOrder = BitOrder::MsbFirst,
+    @symbol_us : UInt32 = DEFAULT_SYMBOL_US,
+  )
+    raise "symbol_us must be >= 1" if @symbol_us == 0
   end
 
   def play(pulses : Array(Pulse), repeats : Int32 = 1)
@@ -29,7 +41,7 @@ class WavePlayer
     total_bytes = packets.sum(0, &.size)
     Log.debug do
       "encoded waveform pulses=#{effective_pulses.size} packets=#{packets.size} packet_bytes=#{total_bytes} " \
-      "repeats=#{repeats} polarity=#{polarity.to_s.downcase}"
+      "repeats=#{repeats} polarity=#{polarity.to_s.downcase} bit_order=#{bit_order_label} symbol_us=#{symbol_us}"
     end
 
     repeats.times do |repeat_index|
@@ -72,7 +84,7 @@ class WavePlayer
     symbols = [] of UInt8
 
     pulses.each do |pulse|
-      count = ((pulse.us + (SYMBOL_US // 2)) // SYMBOL_US).to_i
+      count = ((pulse.us + (symbol_us // 2)) // symbol_us).to_i
       count = 1 if count < 1
 
       value = pulse.level ? 1_u8 : 0_u8
@@ -89,10 +101,18 @@ class WavePlayer
       next if symbol == 0_u8
 
       byte_index = index // 8
-      bit_index = 7 - (index % 8)
+      bit_index = if bit_order.lsb_first?
+                    index % 8
+                  else
+                    7 - (index % 8)
+                  end
       data[byte_index] |= (1_u8 << bit_index)
     end
 
     data
+  end
+
+  private def bit_order_label : String
+    bit_order.lsb_first? ? "lsb" : "msb"
   end
 end

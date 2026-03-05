@@ -23,7 +23,7 @@ describe WavePlayer do
     ]
 
     player.play(pulses, 1)
-    radio.packets.should eq([Bytes[0xFF_u8, 0x00_u8]])
+    radio.packets.should eq([Bytes[0xF0_u8]])
   end
 
   it "retransmits the same packet sequence for each repeat" do
@@ -31,7 +31,7 @@ describe WavePlayer do
     player = WavePlayer.new(radio)
 
     player.play([Pulse.new(level: true, us: 320_u32)], 3)
-    radio.packets.should eq([Bytes[0xFF_u8], Bytes[0xFF_u8], Bytes[0xFF_u8]])
+    radio.packets.should eq([Bytes[0xF0_u8], Bytes[0xF0_u8], Bytes[0xF0_u8]])
   end
 
   it "can invert waveform levels before transmit" do
@@ -44,19 +44,43 @@ describe WavePlayer do
     ]
 
     player.play(pulses, 1)
-    radio.packets.should eq([Bytes[0x00_u8, 0xFF_u8]])
+    radio.packets.should eq([Bytes[0x0F_u8]])
+  end
+
+  it "can pack waveform bits lsb-first for hardware A/B testing" do
+    radio = FakeRadio.new
+    player = WavePlayer.new(radio, bit_order: WavePlayer::BitOrder::LsbFirst)
+
+    pulses = [
+      Pulse.new(level: true, us: 320_u32),
+      Pulse.new(level: false, us: 320_u32),
+    ]
+
+    player.play(pulses, 1)
+    radio.packets.should eq([Bytes[0x0F_u8]])
   end
 
   it "splits payloads into 64-byte packets for CC1101 FIFO limits" do
     radio = FakeRadio.new
     player = WavePlayer.new(radio)
 
-    # 70 bytes of carrier-on symbols (560 bits at 40us each).
-    pulses = [Pulse.new(level: true, us: 22_400_u32)]
+    # 70 bytes of carrier-on symbols (560 bits at 80us each).
+    pulses = [Pulse.new(level: true, us: 44_800_u32)]
 
     player.play(pulses, 1)
     radio.packets.size.should eq(2)
     radio.packets[0].size.should eq(64)
     radio.packets[1].size.should eq(6)
+  end
+
+  it "fits a standard 18-bit CAME frame into a single packet" do
+    radio = FakeRadio.new
+    player = WavePlayer.new(radio)
+
+    frame = CAME::Frame.new("00 00 00 00 00 01 FE B5", 18)
+    player.play(frame.pulses, 1)
+
+    radio.packets.size.should eq(1)
+    radio.packets[0].size.should eq(54)
   end
 end

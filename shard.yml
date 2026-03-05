@@ -18,5 +18,7 @@ authors:
 targets:
   rangehood:
     main: src/elica-rangehood-matter.cr
+  replay_toggle:
+    main: src/replay_reference_toggle.cr
 
 license: MIT

@@ -60,5 +60,6 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 # This is your application
 COPY --from=build /app/deps /
 COPY --from=build /app/bin /
+COPY ./captures /captures
 
 ENTRYPOINT ["/rangehood"]

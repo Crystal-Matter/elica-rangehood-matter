@@ -5,8 +5,17 @@ class Elica::Rangehood::CLI
   Log = ::Log.for("elica_rangehood.cli")
 
   private struct Config
+    enum BitOrderSetting
+      Msb
+      Lsb
+    end
+
     property spi_device : String
     property spi_speed_hz : UInt32
+    property rf_frequency_hz : UInt32
+    property rf_symbol_us : UInt32
+    property rf_bit_order : BitOrderSetting
+    property rf_carrier_test_seconds : Int32
     property repeats : Int32
     property code_bits : Int32
     property toggle_light : String
@@ -21,6 +30,10 @@ class Elica::Rangehood::CLI
     def initialize
       @spi_device = env_string("SPI_DEVICE", "/dev/spidev0.0")
       @spi_speed_hz = env_u32("SPI_SPEED_HZ", 50_000_u32)
+      @rf_frequency_hz = env_u32("RF_FREQUENCY_HZ", CC1101::DEFAULT_FREQUENCY_HZ)
+      @rf_symbol_us = env_u32("RF_SYMBOL_US", WavePlayer::DEFAULT_SYMBOL_US)
+      @rf_bit_order = env_bit_order("RF_BIT_ORDER", BitOrderSetting::Msb)
+      @rf_carrier_test_seconds = env_int("RF_CARRIER_TEST_SECONDS", 0)
       @repeats = env_int("REPEATS", 5)
       @code_bits = env_int("CODE_BITS", 18)
       @toggle_light = env_string("TOGGLE_LIGHT", "00 00 00 00 00 01 FE B5")
@@ -58,6 +71,24 @@ class Elica::Rangehood::CLI
         default
       end
     end
+
+    private def env_bit_order(name : String, default : BitOrderSetting) : BitOrderSetting
+      value = ENV[name]?
+      return default unless value
+
+      parse_bit_order(value) || default
+    end
+
+    private def parse_bit_order(value : String) : BitOrderSetting?
+      case value.downcase
+      when "msb", "msb-first", "msb_first"
+        BitOrderSetting::Msb
+      when "lsb", "lsb-first", "lsb_first"
+        BitOrderSetting::Lsb
+      else
+        nil
+      end
+    end
   end
 
   def self.run : Nil
@@ -70,6 +101,26 @@ class Elica::Rangehood::CLI
         parsed = value.to_u32?
         raise OptionParser::InvalidOption.new("--spi-speed must be a positive integer") unless parsed && parsed > 0
         config.spi_speed_hz = parsed
+      end
+      opts.on("--rf-frequency=HZ", "RF carrier frequency in Hz (default #{config.rf_frequency_hz})") do |value|
+        parsed = value.to_u32?
+        raise OptionParser::InvalidOption.new("--rf-frequency must be a positive integer") unless parsed && parsed > 0
+        config.rf_frequency_hz = parsed
+      end
+      opts.on("--rf-symbol-us=MICROS", "Waveform symbol duration in microseconds (default #{config.rf_symbol_us})") do |value|
+        parsed = value.to_u32?
+        raise OptionParser::InvalidOption.new("--rf-symbol-us must be a positive integer") unless parsed && parsed > 0
+        config.rf_symbol_us = parsed
+      end
+      opts.on("--rf-bit-order=ORDER", "RF packet bit order: msb|lsb (default #{config.rf_bit_order.to_s.downcase})") do |value|
+        parsed = parse_bit_order(value)
+        raise OptionParser::InvalidOption.new("--rf-bit-order must be one of: msb, lsb") unless parsed
+        config.rf_bit_order = parsed
+      end
+      opts.on("--rf-carrier-test-seconds=SECONDS", "Transmit high-duty RF carrier packets for N seconds and exit") do |value|
+        parsed = value.to_i?
+        raise OptionParser::InvalidOption.new("--rf-carrier-test-seconds must be >= 1") unless parsed && parsed > 0
+        config.rf_carrier_test_seconds = parsed
       end
       opts.on("--repeats=COUNT", "RF repeat count (default #{config.repeats})") do |value|
         parsed = value.to_i?
@@ -100,9 +151,15 @@ class Elica::Rangehood::CLI
       run_hardware_test(config)
       return
     end
+    if config.rf_carrier_test_seconds > 0
+      run_rf_carrier_test(config)
+      return
+    end
 
     Log.info do
       "starting service spi_device=#{config.spi_device} spi_speed_hz=#{config.spi_speed_hz} " \
+      "rf_frequency_hz=#{config.rf_frequency_hz} " \
+      "rf_symbol_us=#{config.rf_symbol_us} rf_bit_order=#{config.rf_bit_order.to_s.downcase} " \
       "repeats=#{config.repeats} code_bits=#{config.code_bits} storage=#{config.storage_file} " \
       "waveform_polarity=#{waveform_polarity(config).to_s.downcase}"
     end
@@ -115,9 +172,14 @@ class Elica::Rangehood::CLI
     begin
       radio = CC1101.new(spi)
       radio.reset
-      radio.configure_ook_433
+      radio.configure_ook(config.rf_frequency_hz, config.rf_symbol_us)
 
-      wave_player = WavePlayer.new(radio, waveform_polarity(config))
+      wave_player = WavePlayer.new(
+        radio,
+        waveform_polarity(config),
+        waveform_bit_order(config),
+        config.rf_symbol_us
+      )
       control = Elica::Rangehood::Control.new(
         wave_player,
         repeats: config.repeats,
@@ -149,6 +211,9 @@ class Elica::Rangehood::CLI
     puts "Hardware test mode enabled"
     puts "SPI device: #{config.spi_device}"
     puts "SPI speed (Hz): #{config.spi_speed_hz}"
+    puts "RF frequency (Hz): #{config.rf_frequency_hz}"
+    puts "RF symbol (us): #{config.rf_symbol_us}"
+    puts "RF bit order: #{config.rf_bit_order.to_s.downcase}"
     puts "Waveform polarity: #{waveform_polarity(config).to_s.downcase}"
     puts ""
 
@@ -172,13 +237,19 @@ class Elica::Rangehood::CLI
       current_state = radio.state
       puts "[4/8] CC1101 detected (PARTNUM=0x#{hex_u8(partnum)}, VERSION=0x#{hex_u8(version)}, state=0x#{hex_u8(current_state)})"
 
-      radio.configure_ook_433
-      puts "[5/8] CC1101 configured for OOK 433.92MHz"
+      radio.configure_ook(config.rf_frequency_hz, config.rf_symbol_us)
+      puts "[5/8] CC1101 configured for OOK at #{config.rf_frequency_hz} Hz"
 
-      assert_register(radio, CC1101::FREQ2, 0x10_u8, "FREQ2")
-      assert_register(radio, CC1101::FREQ1, 0xB0_u8, "FREQ1")
-      assert_register(radio, CC1101::FREQ0, 0x71_u8, "FREQ0")
+      expected_freq2, expected_freq1, expected_freq0 = frequency_register_values(config.rf_frequency_hz)
+      expected_mdmcfg4, expected_mdmcfg3 = data_rate_register_values(config.rf_symbol_us)
+
+      assert_register(radio, CC1101::FREQ2, expected_freq2, "FREQ2")
+      assert_register(radio, CC1101::FREQ1, expected_freq1, "FREQ1")
+      assert_register(radio, CC1101::FREQ0, expected_freq0, "FREQ0")
+      assert_register(radio, CC1101::MDMCFG4, expected_mdmcfg4, "MDMCFG4")
+      assert_register(radio, CC1101::MDMCFG3, expected_mdmcfg3, "MDMCFG3")
       assert_register(radio, CC1101::MDMCFG2, 0x30_u8, "MDMCFG2")
+      assert_register(radio, CC1101::FREND0, 0x11_u8, "FREND0")
       puts "[6/8] CC1101 register readback passed"
 
       validate_came_config("toggle-light", config.toggle_light, config.code_bits)
@@ -187,7 +258,12 @@ class Elica::Rangehood::CLI
       validate_came_config("fan-off", config.fan_off, config.code_bits)
       puts "[7/8] CAME frame parsing/encoding passed"
 
-      wave_player = WavePlayer.new(radio, waveform_polarity(config))
+      wave_player = WavePlayer.new(
+        radio,
+        waveform_polarity(config),
+        waveform_bit_order(config),
+        config.rf_symbol_us
+      )
       diagnostic_pulses = [
         Pulse.new(level: false, us: CAME::T_US),
         Pulse.new(level: true, us: CAME::T_US),
@@ -214,6 +290,45 @@ class Elica::Rangehood::CLI
     end
   end
 
+  private def self.run_rf_carrier_test(config : Config) : Nil
+    puts "RF carrier test mode enabled"
+    puts "SPI device: #{config.spi_device}"
+    puts "SPI speed (Hz): #{config.spi_speed_hz}"
+    puts "RF frequency (Hz): #{config.rf_frequency_hz}"
+    puts "RF symbol (us): #{config.rf_symbol_us}"
+    puts "Duration (s): #{config.rf_carrier_test_seconds}"
+    puts ""
+
+    started_at = Time.instant
+    spi = SpiDevice.new(config.spi_device, config.spi_speed_hz)
+    begin
+      radio = CC1101.new(spi)
+      radio.reset
+      radio.configure_ook(config.rf_frequency_hz, config.rf_symbol_us)
+
+      packet = Bytes.new(64, 0xFF_u8)
+      deadline = Time.instant + config.rf_carrier_test_seconds.seconds
+      packets_sent = 0
+
+      while Time.instant < deadline
+        radio.transmit(packet)
+        packets_sent += 1
+      end
+
+      elapsed_s = (Time.instant - started_at).total_seconds
+      puts "[PASS] Sent #{packets_sent} high-carrier packets in #{elapsed_s.round(2)} s"
+    rescue ex
+      puts "[FAIL] RF carrier test failed: #{ex.message}"
+      if trace = ex.backtrace?
+        trace.first(8).each { |line| puts "  #{line}" }
+      end
+      exit 1
+    ensure
+      spi.close
+      puts "SPI device closed"
+    end
+  end
+
   private def self.validate_came_config(label : String, key : String, code_bits : Int32) : Nil
     frame = CAME::Frame.new(key, code_bits)
     raise "#{label} CAME pulse sequence is empty" if frame.pulses.empty?
@@ -232,6 +347,53 @@ class Elica::Rangehood::CLI
 
   private def self.waveform_polarity(config : Config) : WavePlayer::Polarity
     config.invert_waveform? ? WavePlayer::Polarity::Inverted : WavePlayer::Polarity::Normal
+  end
+
+  private def self.waveform_bit_order(config : Config) : WavePlayer::BitOrder
+    config.rf_bit_order.lsb? ? WavePlayer::BitOrder::LsbFirst : WavePlayer::BitOrder::MsbFirst
+  end
+
+  private def self.frequency_register_values(frequency_hz : UInt32) : Tuple(UInt8, UInt8, UInt8)
+    fxosc_hz = 26_000_000_u64
+    word = (((frequency_hz.to_u64 * (1_u64 << 16)) + (fxosc_hz // 2)) // fxosc_hz).to_u32
+    {
+      ((word >> 16) & 0xFF).to_u8,
+      ((word >> 8) & 0xFF).to_u8,
+      (word & 0xFF).to_u8,
+    }
+  end
+
+  private def self.data_rate_register_values(symbol_us : UInt32) : Tuple(UInt8, UInt8)
+    target_baud = 1_000_000.0 / symbol_us
+
+    best_error = Float64::INFINITY
+    best_mdmcfg4 = 0_u8
+    best_mdmcfg3 = 0_u8
+
+    0_u8.upto(15_u8) do |drate_e|
+      0_u8.upto(255_u8) do |drate_m|
+        actual_baud = ((256.0 + drate_m) * (2.0 ** drate_e) * 26_000_000.0) / (2.0 ** 28)
+        error = (actual_baud - target_baud).abs
+        next unless error < best_error
+
+        best_error = error
+        best_mdmcfg4 = drate_e
+        best_mdmcfg3 = drate_m
+      end
+    end
+
+    {best_mdmcfg4, best_mdmcfg3}
+  end
+
+  private def self.parse_bit_order(value : String) : Config::BitOrderSetting?
+    case value.downcase
+    when "msb", "msb-first", "msb_first"
+      Config::BitOrderSetting::Msb
+    when "lsb", "lsb-first", "lsb_first"
+      Config::BitOrderSetting::Lsb
+    else
+      nil
+    end
   end
 
   private def self.configure_logging(log_level : String) : Nil

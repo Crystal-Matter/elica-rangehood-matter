@@ -46,6 +46,26 @@ describe CC1101 do
     spi.requests[1].should eq(Bytes[CC1101::VERSION | 0x80_u8, 0x00_u8])
   end
 
+  it "programs frequency registers from the configured carrier frequency" do
+    spi = FakeSpi.new
+
+    # idle() during configure_ook
+    spi.queue_response(Bytes[0_u8])                         # SIDLE strobe
+    spi.queue_response(Bytes[0_u8, CC1101::MARCSTATE_IDLE]) # read state
+    16.times { spi.queue_response(Bytes[0_u8, 0_u8]) }      # register writes + SCAL strobe
+    spi.queue_response(Bytes[0_u8, CC1101::MARCSTATE_IDLE]) # read state after SCAL
+
+    radio = CC1101.new(spi)
+    radio.configure_ook(433_657_070_u32)
+
+    spi.requests[2].should eq(Bytes[CC1101::FREQ2, 0x10_u8])
+    spi.requests[3].should eq(Bytes[CC1101::FREQ1, 0xAD_u8])
+    spi.requests[4].should eq(Bytes[CC1101::FREQ0, 0xDB_u8])
+    spi.requests[6].should eq(Bytes[CC1101::MDMCFG4, 0x08_u8])
+    spi.requests[7].should eq(Bytes[CC1101::MDMCFG3, 0xF8_u8])
+    spi.requests[10].should eq(Bytes[CC1101::FREND0, 0x11_u8])
+  end
+
   it "raises when packet exceeds 64 bytes" do
     spi = FakeSpi.new
     radio = CC1101.new(spi)
@@ -68,7 +88,8 @@ describe CC1101 do
     spi.queue_response(Bytes.new(5, 0_u8)) # write burst
     spi.queue_response(Bytes[0_u8])        # STX strobe
 
-    # state poll after STX returns IDLE
+    # state poll after STX enters TX then returns IDLE
+    spi.queue_response(Bytes[0_u8, 0x13_u8])
     spi.queue_response(Bytes[0_u8, CC1101::MARCSTATE_IDLE])
 
     radio = CC1101.new(spi)

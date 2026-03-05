@@ -9,6 +9,7 @@ services:
       - ${SPI_DEVICE:-/dev/spidev0.0}:${SPI_DEVICE:-/dev/spidev0.0}
     volumes:
       - ./data:/data
+      - ./captures:/captures:ro
     environment:
       SPI_DEVICE: ${SPI_DEVICE:-/dev/spidev0.0}
       SPI_SPEED_HZ: ${SPI_SPEED_HZ:-50000}

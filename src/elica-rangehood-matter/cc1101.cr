@@ -10,8 +10,11 @@ class CC1101
   include RadioTransmitter
   Log = ::Log.for("elica_rangehood.cc1101")
 
+  FXOSC_HZ = 26_000_000_u64
+
   # Strobe commands
   SRES  = 0x30_u8
+  SCAL  = 0x33_u8
   STX   = 0x35_u8
   SIDLE = 0x36_u8
   SFTX  = 0x3B_u8
@@ -41,7 +44,9 @@ class CC1101
   VERSION   = 0xF1_u8
   MARCSTATE = 0xF5_u8 # 0xC0 (status) | 0x35
 
-  EXPECTED_PARTNUM = 0x00_u8
+  EXPECTED_PARTNUM     =         0x00_u8
+  DEFAULT_FREQUENCY_HZ = 433_657_070_u32
+  DEFAULT_SYMBOL_US    =          80_u32
 
   # MARCSTATE values
   MARCSTATE_IDLE             = 0x01_u8
@@ -100,27 +105,38 @@ class CC1101
     read_reg(VERSION)
   end
 
-  # Configure for 433.92 MHz OOK transmission at 25 kBaud.
-  # Each FIFO bit maps to ~40us of RF output.
-  def configure_ook_433
+  # Configure OOK transmission at the requested carrier frequency and symbol timing.
+  # Each FIFO bit maps to one symbol of approximately `symbol_us` microseconds.
+  def configure_ook(
+    frequency_hz : UInt32 = DEFAULT_FREQUENCY_HZ,
+    symbol_us : UInt32 = DEFAULT_SYMBOL_US,
+  )
+    raise "symbol_us must be >= 1" if symbol_us == 0
+
     idle
 
-    # Carrier frequency: 433.92 MHz (0x10B071 @ 26MHz crystal)
-    write_reg(FREQ2, 0x10_u8)
-    write_reg(FREQ1, 0xB0_u8)
-    write_reg(FREQ0, 0x71_u8)
+    freq_word = frequency_word(frequency_hz)
+    freq2 = ((freq_word >> 16) & 0xFF).to_u8
+    freq1 = ((freq_word >> 8) & 0xFF).to_u8
+    freq0 = (freq_word & 0xFF).to_u8
+    mdmcfg4, mdmcfg3, actual_baud = data_rate_register_values(symbol_us)
+
+    # Carrier frequency word: freq_hz * 2^16 / 26MHz crystal
+    write_reg(FREQ2, freq2)
+    write_reg(FREQ1, freq1)
+    write_reg(FREQ0, freq0)
 
     # ASK/OOK, no sync word, no preamble
     write_reg(MDMCFG2, 0x30_u8)
 
-    # Data rate: ~24.8 kBaud (near 25 kBaud)
-    write_reg(MDMCFG4, 0x0A_u8)
-    write_reg(MDMCFG3, 0x3B_u8)
+    # Data rate for symbol timing; channel bandwidth remains at default high BW.
+    write_reg(MDMCFG4, mdmcfg4)
+    write_reg(MDMCFG3, mdmcfg3)
 
     # Fixed length, no CRC, no whitening
     write_reg(PKTCTRL0, 0x00_u8)
 
-    # OOK front-end configuration
+    # OOK front-end configuration.
     write_reg(DEVIATN, 0x00_u8)
     write_reg(FREND0, 0x11_u8)
 
@@ -135,6 +151,49 @@ class CC1101
     write_reg(FSCAL2, 0x2A_u8)
     write_reg(FSCAL1, 0x00_u8)
     write_reg(FSCAL0, 0x1F_u8)
+
+    Log.debug do
+      symbol_rate = 1_000_000.0 / symbol_us
+      "cc1101 configure_ook freq_hz=#{frequency_hz} symbol_us=#{symbol_us} " \
+      "target_baud=#{symbol_rate.round(2)} actual_baud=#{actual_baud.round(2)} " \
+      "mdmcfg4=0x#{mdmcfg4.to_s(16).upcase.rjust(2, '0')} mdmcfg3=0x#{mdmcfg3.to_s(16).upcase.rjust(2, '0')}"
+    end
+
+    strobe(SCAL)
+    500.times do
+      return if state == MARCSTATE_IDLE
+      sleep 100.microseconds
+    end
+    raise "CC1101 calibration timeout"
+  end
+
+  private def frequency_word(frequency_hz : UInt32) : UInt32
+    (((frequency_hz.to_u64 * (1_u64 << 16)) + (FXOSC_HZ // 2)) // FXOSC_HZ).to_u32
+  end
+
+  private def data_rate_register_values(symbol_us : UInt32) : Tuple(UInt8, UInt8, Float64)
+    target_baud = 1_000_000.0 / symbol_us
+
+    best_error = Float64::INFINITY
+    best_mdmcfg4 = 0x08_u8
+    best_mdmcfg3 = 0xF8_u8
+    best_rate = 0.0
+
+    0_u8.upto(15_u8) do |drate_e|
+      0_u8.upto(255_u8) do |drate_m|
+        actual_baud = ((256.0 + drate_m) * (2.0 ** drate_e) * FXOSC_HZ.to_f) / (2.0 ** 28)
+        error = (actual_baud - target_baud).abs
+        next unless error < best_error
+
+        best_error = error
+        # Keep CHANBW bits at 0 (highest bandwidth) and set DRATE_E in low nibble.
+        best_mdmcfg4 = drate_e
+        best_mdmcfg3 = drate_m
+        best_rate = actual_baud
+      end
+    end
+
+    {best_mdmcfg4, best_mdmcfg3, best_rate}
   end
 
   # Transmit a single packet from TX FIFO. Data must be <= 64 bytes.
@@ -152,13 +211,21 @@ class CC1101
     strobe(STX)
 
     completed = false
+    saw_non_idle_state = false
     500.times do
       sleep 200.microseconds
       current = state
       if current == MARCSTATE_IDLE
+        unless saw_non_idle_state
+          Log.warn { "cc1101 tx never left IDLE bytes=#{data.size}" }
+          raise "TX did not start (radio remained IDLE)"
+        end
         completed = true
         break
       end
+
+      saw_non_idle_state = true
+
       if current == MARCSTATE_TXFIFO_UNDERFLOW
         strobe(SFTX)
         Log.warn { "cc1101 tx fifo underflow bytes=#{data.size}" }
