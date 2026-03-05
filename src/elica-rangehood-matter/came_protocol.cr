@@ -2,8 +2,8 @@ require "./waveform_pulse"
 
 # CAME protocol encoder
 module CAME
-  T_US   =   320_u32 # Base timing unit
-  GAP_US = 16500_u32 # Inter-frame gap (~52T, matches real capture)
+  T_US   =   333_u32 # Base timing unit (matches ESP8266 reference SINGLE_PERIOD)
+  GAP_US = 16000_u32 # Inter-frame gap (~48T, matches ESP8266 reference 16ms)
 
   def self.parse_key(hex_key : String, num_bits : Int32) : UInt64
     raise "num_bits must be between 1 and 64 (got #{num_bits})" unless (1..64).includes?(num_bits)

@@ -16,7 +16,7 @@ class WavePlayer
     LsbFirst
   end
 
-  DEFAULT_SYMBOL_US = 80_u32
+  DEFAULT_SYMBOL_US = 333_u32
   MAX_PACKET_BYTES  =     64
 
   getter polarity : Polarity

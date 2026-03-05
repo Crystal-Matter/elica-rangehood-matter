@@ -29,7 +29,7 @@ Notes:
 - Keep wiring short and ground shared.
 - A short wire antenna (about `17.3 cm`, quarter-wave at 433MHz) often improves range.
 - Part no. E07-M1101D (433M V2.0)
-- Runtime defaults in this project are tuned for E07-M1101D (CC1101 + 26MHz crystal) on `433.657070MHz` OOK.
+- Runtime defaults in this project are tuned for E07-M1101D (CC1101 + 26MHz crystal) on `433.920MHz` OOK.
 
 ## Prerequisites
 
@@ -103,7 +103,7 @@ Replay the reference working toggle frames extracted from capture files:
 Replay options:
 
 ```bash
-./bin/replay_toggle --rf-frequency=433920000 --rf-symbol-us=320 --rf-bit-order=msb --replay-count=2
+./bin/replay_toggle --rf-frequency=433920000 --rf-symbol-us=333 --rf-bit-order=msb --replay-count=2
 ```
 
 By default this tool reads:
@@ -122,8 +122,8 @@ Environment variables:
 
 - `SPI_DEVICE` (default: `/dev/spidev0.0`)
 - `SPI_SPEED_HZ` (default: `50000`)
-- `RF_FREQUENCY_HZ` (default: `433657070`)
-- `RF_SYMBOL_US` (default: `80`)
+- `RF_FREQUENCY_HZ` (default: `433920000`)
+- `RF_SYMBOL_US` (default: `333`)
 - `RF_BIT_ORDER` (default: `msb`, supported: `msb`, `lsb`)
 - `RF_CARRIER_TEST_SECONDS` (default: `0`, disabled)
 - `REFERENCE_RAW_CAPTURE` (default: `captures/Raw_light_toggle.sub`, replay tool only)
@@ -151,10 +151,10 @@ SPI_DEVICE=/dev/spidev0.0 SPI_SPEED_HZ=50000 REPEATS=6 ./bin/rangehood
 Practical RF tuning matrix (one toggle capture per row):
 
 ```bash
-RF_FREQUENCY_HZ=433657070 RF_SYMBOL_US=80 RF_BIT_ORDER=msb ./bin/rangehood
-RF_FREQUENCY_HZ=433657070 RF_SYMBOL_US=80 RF_BIT_ORDER=lsb ./bin/rangehood
-RF_FREQUENCY_HZ=433920000 RF_SYMBOL_US=80 RF_BIT_ORDER=msb ./bin/rangehood
-RF_FREQUENCY_HZ=433920000 RF_SYMBOL_US=40 RF_BIT_ORDER=msb ./bin/rangehood
+RF_FREQUENCY_HZ=433920000 RF_SYMBOL_US=333 RF_BIT_ORDER=msb ./bin/rangehood
+RF_FREQUENCY_HZ=433920000 RF_SYMBOL_US=333 RF_BIT_ORDER=lsb ./bin/rangehood
+RF_FREQUENCY_HZ=433920000 RF_SYMBOL_US=111 RF_BIT_ORDER=msb ./bin/rangehood
+RF_FREQUENCY_HZ=433657070 RF_SYMBOL_US=333 RF_BIT_ORDER=msb ./bin/rangehood
 ```
 
 ## Docker
