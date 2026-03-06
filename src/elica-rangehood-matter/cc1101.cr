@@ -105,6 +105,11 @@ class CC1101
     strobe(SFTX)
     strobe(SFRX)
     sleep 1.milliseconds
+
+    # Verify chip is alive: VERSION must be non-zero (typically 0x14)
+    ver = version
+    Log.info { "cc1101 reset complete version=0x#{ver.to_s(16).upcase.rjust(2, '0')}" }
+    raise "CC1101 not responding after reset (VERSION=0x00, check SPI wiring)" if ver == 0
   end
 
   def idle
@@ -203,12 +208,24 @@ class CC1101
     # --- PA table: index 0 = off (0x00), index 1 = max power (0xC0, ~10 dBm) ---
     write_burst(PATABLE, Bytes[0x00_u8, 0xC0_u8])
 
-    Log.debug do
+    Log.info do
       symbol_rate = 1_000_000.0 / symbol_us
       "cc1101 configure_ook freq_hz=#{frequency_hz} symbol_us=#{symbol_us} " \
       "target_baud=#{symbol_rate.round(2)} actual_baud=#{actual_baud.round(2)} " \
-      "mdmcfg4=0x#{mdmcfg4.to_s(16).upcase.rjust(2, '0')} mdmcfg3=0x#{mdmcfg3.to_s(16).upcase.rjust(2, '0')}"
+      "mdmcfg4=0x#{hex8(mdmcfg4)} mdmcfg3=0x#{hex8(mdmcfg3)}"
     end
+
+    # Verify critical registers were written correctly
+    verify_register(MDMCFG4, mdmcfg4, "MDMCFG4")
+    verify_register(MDMCFG3, mdmcfg3, "MDMCFG3")
+    verify_register(MDMCFG2, 0x30_u8, "MDMCFG2")
+    verify_register(MDMCFG1, 0x00_u8, "MDMCFG1")
+    verify_register(PKTCTRL0, 0x00_u8, "PKTCTRL0")
+    verify_register(FREND0, 0x11_u8, "FREND0")
+    verify_register(MCSM0, 0x18_u8, "MCSM0")
+
+    # Dump all config registers for diagnostics
+    dump_registers
 
     strobe(SCAL)
     500.times do
@@ -216,6 +233,38 @@ class CC1101
       sleep 100.microseconds
     end
     raise "CC1101 calibration timeout"
+  end
+
+  # Read back and verify a register value matches expected
+  private def verify_register(addr : UInt8, expected : UInt8, name : String)
+    actual = read_reg(addr)
+    if actual != expected
+      Log.error { "cc1101 register MISMATCH #{name} expected=0x#{hex8(expected)} actual=0x#{hex8(actual)}" }
+      raise "CC1101 register #{name} write failed: expected 0x#{hex8(expected)}, got 0x#{hex8(actual)}"
+    end
+  end
+
+  # Log all critical register values for remote debugging
+  def dump_registers
+    regs = {
+      "IOCFG2" => IOCFG2, "IOCFG0" => IOCFG0, "FIFOTHR" => FIFOTHR,
+      "PKTLEN" => PKTLEN, "PKTCTRL1" => PKTCTRL1, "PKTCTRL0" => PKTCTRL0,
+      "FSCTRL1" => FSCTRL1, "FSCTRL0" => FSCTRL0,
+      "FREQ2" => FREQ2, "FREQ1" => FREQ1, "FREQ0" => FREQ0,
+      "MDMCFG4" => MDMCFG4, "MDMCFG3" => MDMCFG3, "MDMCFG2" => MDMCFG2,
+      "MDMCFG1" => MDMCFG1, "MDMCFG0" => MDMCFG0, "DEVIATN" => DEVIATN,
+      "MCSM1" => MCSM1, "MCSM0" => MCSM0, "FOCCFG" => FOCCFG,
+      "AGCCTRL2" => AGCCTRL2, "AGCCTRL1" => AGCCTRL1, "AGCCTRL0" => AGCCTRL0,
+      "FREND1" => FREND1, "FREND0" => FREND0,
+      "FSCAL3" => FSCAL3, "FSCAL2" => FSCAL2, "FSCAL1" => FSCAL1, "FSCAL0" => FSCAL0,
+    }
+
+    parts = regs.map { |name, addr| "#{name}=0x#{hex8(read_reg(addr))}" }
+    Log.info { "cc1101 register dump: #{parts.join(' ')}" }
+  end
+
+  private def hex8(v : UInt8) : String
+    v.to_s(16).upcase.rjust(2, '0')
   end
 
   private def frequency_word(frequency_hz : UInt32) : UInt32

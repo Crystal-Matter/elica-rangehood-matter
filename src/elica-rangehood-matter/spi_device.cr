@@ -22,6 +22,12 @@ module LinuxSPI
   # _IOC(_IOC_WRITE, 'k', 0, sizeof(spi_ioc_transfer))
   # = (1 << 30) | (32 << 16) | (0x6B << 8) | 0
   SPI_IOC_MESSAGE_1 = 0x40206B00_u64
+
+  # SPI mode and configuration ioctls
+  SPI_IOC_WR_MODE          = 0x40016B01_u64
+  SPI_IOC_WR_BITS_PER_WORD = 0x40016B03_u64
+  SPI_IOC_WR_MAX_SPEED_HZ  = 0x40046B04_u64
+  SPI_IOC_RD_MODE          = 0x80016B01_u64
 end
 
 module SpiTransport
@@ -39,6 +45,20 @@ class SpiDevice
   def initialize(device : String = "/dev/spidev0.0", @speed : UInt32 = 50_000_u32)
     @io = File.open(device, "r+")
     @fd = @io.fd
+
+    # Force SPI mode 0 (CPOL=0, CPHA=0) — required by CC1101
+    mode = 0_u8
+    rc = LibC.ioctl(@fd, LinuxSPI::SPI_IOC_WR_MODE, pointerof(mode).as(Void*))
+    raise "SPI set mode 0 failed (ioctl returned #{rc})" if rc < 0
+
+    # Force 8 bits per word
+    bpw = 8_u8
+    rc = LibC.ioctl(@fd, LinuxSPI::SPI_IOC_WR_BITS_PER_WORD, pointerof(bpw).as(Void*))
+    raise "SPI set bits_per_word failed (ioctl returned #{rc})" if rc < 0
+
+    # Set max speed
+    rc = LibC.ioctl(@fd, LinuxSPI::SPI_IOC_WR_MAX_SPEED_HZ, pointerof(@speed).as(Void*))
+    raise "SPI set max speed failed (ioctl returned #{rc})" if rc < 0
   end
 
   def close

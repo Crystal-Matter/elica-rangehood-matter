@@ -271,15 +271,20 @@ class Elica::Rangehood::CLI
         waveform_bit_order(config),
         config.rf_symbol_us
       )
-      diagnostic_pulses = [
-        Pulse.new(level: false, us: CAME::T_US),
-        Pulse.new(level: true, us: CAME::T_US),
-        Pulse.new(level: false, us: CAME::T_US * 2),
-        Pulse.new(level: true, us: CAME::T_US),
-        Pulse.new(level: false, us: CAME::GAP_US),
-      ]
-      wave_player.play(diagnostic_pulses, 1)
-      puts "[8/8] Waveform encoding/transmit test packet sent"
+
+      # Send a square wave test pattern: alternating 0xAA bytes = alternating ON/OFF
+      # at the configured data rate. Easy to verify on Flipper:
+      # expect equal-length ON/OFF pulses of symbol_us duration.
+      puts "       Sending square wave test (0xAA * 8 bytes)..."
+      square_wave = Bytes.new(8, 0xAA_u8)
+      radio.transmit(square_wave)
+      sleep 50.milliseconds
+
+      # Send actual CAME toggle-light frame
+      puts "       Sending CAME toggle-light frame..."
+      frame = CAME::Frame.new(config.toggle_light, config.code_bits)
+      wave_player.play(frame.pulses, 1)
+      puts "[8/8] RF test packets sent (square wave + CAME frame)"
 
       elapsed_ms = (Time.instant - started_at).total_milliseconds
       puts ""
