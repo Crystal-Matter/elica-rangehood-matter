@@ -17,19 +17,34 @@ class CC1101
   SCAL  = 0x33_u8
   STX   = 0x35_u8
   SIDLE = 0x36_u8
+  SFRX  = 0x3A_u8
   SFTX  = 0x3B_u8
 
   # Configuration registers
+  IOCFG2   = 0x00_u8
   IOCFG0   = 0x02_u8
+  FIFOTHR  = 0x03_u8
   PKTLEN   = 0x06_u8
+  PKTCTRL1 = 0x07_u8
   PKTCTRL0 = 0x08_u8
+  FSCTRL1  = 0x0B_u8
+  FSCTRL0  = 0x0C_u8
   FREQ2    = 0x0D_u8
   FREQ1    = 0x0E_u8
   FREQ0    = 0x0F_u8
   MDMCFG4  = 0x10_u8
   MDMCFG3  = 0x11_u8
   MDMCFG2  = 0x12_u8
+  MDMCFG1  = 0x13_u8
+  MDMCFG0  = 0x14_u8
   DEVIATN  = 0x15_u8
+  MCSM1    = 0x17_u8
+  MCSM0    = 0x18_u8
+  FOCCFG   = 0x19_u8
+  AGCCTRL2 = 0x1B_u8
+  AGCCTRL1 = 0x1C_u8
+  AGCCTRL0 = 0x1D_u8
+  FREND1   = 0x21_u8
   FREND0   = 0x22_u8
   FSCAL3   = 0x23_u8
   FSCAL2   = 0x24_u8
@@ -79,8 +94,17 @@ class CC1101
   end
 
   def reset
+    # Toggle CS to signal the CC1101 (reference driver does this before SRES)
+    @spi.transfer(Bytes[0x00])
+    sleep 1.milliseconds
+
     strobe(SRES)
-    sleep 5.milliseconds
+    sleep 10.milliseconds
+
+    # Flush both FIFOs after reset
+    strobe(SFTX)
+    strobe(SFRX)
+    sleep 1.milliseconds
   end
 
   def idle
@@ -107,6 +131,9 @@ class CC1101
 
   # Configure OOK transmission at the requested carrier frequency and symbol timing.
   # Each FIFO bit maps to one symbol of approximately `symbol_us` microseconds.
+  #
+  # This sets ALL registers needed for reliable OOK TX, matching the approach
+  # used by proven reference drivers (mengguang/cc1101-raspberrypi).
   def configure_ook(
     frequency_hz : UInt32 = DEFAULT_FREQUENCY_HZ,
     symbol_us : UInt32 = DEFAULT_SYMBOL_US,
@@ -121,36 +148,60 @@ class CC1101
     freq0 = (freq_word & 0xFF).to_u8
     mdmcfg4, mdmcfg3, actual_baud = data_rate_register_values(symbol_us)
 
-    # Carrier frequency word: freq_hz * 2^16 / 26MHz crystal
+    # --- GDO pins ---
+    write_reg(IOCFG2, 0x29_u8)  # GDO2: CHIP_RDYn (default)
+    write_reg(IOCFG0, 0x06_u8)  # GDO0: asserts on sync/end-of-packet
+
+    # --- FIFO threshold ---
+    write_reg(FIFOTHR, 0x07_u8) # TX FIFO threshold: 33 bytes
+
+    # --- Packet engine ---
+    write_reg(PKTCTRL1, 0x00_u8) # No append status, no address check
+    write_reg(PKTCTRL0, 0x00_u8) # Fixed length, no CRC, no whitening
+
+    # --- Frequency synthesizer ---
+    write_reg(FSCTRL1, 0x06_u8) # IF frequency
+    write_reg(FSCTRL0, 0x00_u8) # Frequency offset
+
+    # --- Carrier frequency ---
     write_reg(FREQ2, freq2)
     write_reg(FREQ1, freq1)
     write_reg(FREQ0, freq0)
 
-    # ASK/OOK, no sync word, no preamble
-    write_reg(MDMCFG2, 0x30_u8)
+    # --- Modem configuration ---
+    write_reg(MDMCFG4, mdmcfg4)            # Channel BW + data rate exponent
+    write_reg(MDMCFG3, mdmcfg3)            # Data rate mantissa
+    write_reg(MDMCFG2, 0x30_u8)            # ASK/OOK, no sync word
+    write_reg(MDMCFG1, 0x00_u8)            # No FEC, 0 preamble bytes
+    write_reg(MDMCFG0, 0xF8_u8)            # Channel spacing (default)
 
-    # Data rate for symbol timing; channel bandwidth remains at default high BW.
-    write_reg(MDMCFG4, mdmcfg4)
-    write_reg(MDMCFG3, mdmcfg3)
-
-    # Fixed length, no CRC, no whitening
-    write_reg(PKTCTRL0, 0x00_u8)
-
-    # OOK front-end configuration.
+    # --- Deviation (not used for OOK but set explicitly) ---
     write_reg(DEVIATN, 0x00_u8)
-    write_reg(FREND0, 0x11_u8)
 
-    # PA table: index 0 off, index 1 on (~10 dBm)
-    write_burst(PATABLE, Bytes[0x00_u8, 0xC0_u8])
+    # --- Main radio control state machine ---
+    write_reg(MCSM1, 0x30_u8)   # CCA always, TX→IDLE after packet
+    write_reg(MCSM0, 0x18_u8)   # Auto-calibrate on IDLE→RX/TX transition
 
-    # GDO0 asserts on packet TX complete
-    write_reg(IOCFG0, 0x06_u8)
+    # --- Frequency offset compensation (RX, but set for completeness) ---
+    write_reg(FOCCFG, 0x16_u8)
 
-    # Frequency synthesizer calibration values
+    # --- AGC (RX, but set explicitly to known values) ---
+    write_reg(AGCCTRL2, 0x43_u8)
+    write_reg(AGCCTRL1, 0x40_u8)
+    write_reg(AGCCTRL0, 0x91_u8)
+
+    # --- Front-end configuration ---
+    write_reg(FREND1, 0x56_u8)  # RX front-end (default)
+    write_reg(FREND0, 0x11_u8)  # TX OOK: use PA_POWER index 1
+
+    # --- Frequency synthesizer calibration ---
     write_reg(FSCAL3, 0xE9_u8)
     write_reg(FSCAL2, 0x2A_u8)
     write_reg(FSCAL1, 0x00_u8)
     write_reg(FSCAL0, 0x1F_u8)
+
+    # --- PA table: index 0 = off (0x00), index 1 = max power (0xC0, ~10 dBm) ---
+    write_burst(PATABLE, Bytes[0x00_u8, 0xC0_u8])
 
     Log.debug do
       symbol_rate = 1_000_000.0 / symbol_us
@@ -200,7 +251,10 @@ class CC1101
   def transmit(data : Slice(UInt8))
     raise "TX data too large: #{data.size} bytes (max 64)" if data.size > 64
 
-    Log.debug { "cc1101 tx start bytes=#{data.size}" }
+    Log.debug {
+      hex = data.map { |b| b.to_s(16).upcase.rjust(2, '0') }.join(' ')
+      "cc1101 tx start bytes=#{data.size} data=#{hex}"
+    }
 
     idle
     strobe(SFTX)
