@@ -249,7 +249,14 @@ class Elica::Rangehood::CLI
       assert_register(radio, CC1101::MDMCFG4, expected_mdmcfg4, "MDMCFG4")
       assert_register(radio, CC1101::MDMCFG3, expected_mdmcfg3, "MDMCFG3")
       assert_register(radio, CC1101::MDMCFG2, 0x30_u8, "MDMCFG2")
+      assert_register(radio, CC1101::MDMCFG1, 0x00_u8, "MDMCFG1")
+      assert_register(radio, CC1101::PKTCTRL1, 0x00_u8, "PKTCTRL1")
+      assert_register(radio, CC1101::PKTCTRL0, 0x00_u8, "PKTCTRL0")
+      assert_register(radio, CC1101::FSCTRL1, 0x06_u8, "FSCTRL1")
+      assert_register(radio, CC1101::MCSM0, 0x18_u8, "MCSM0")
+      assert_register(radio, CC1101::MCSM1, 0x30_u8, "MCSM1")
       assert_register(radio, CC1101::FREND0, 0x11_u8, "FREND0")
+      assert_register(radio, CC1101::DEVIATN, 0x00_u8, "DEVIATN")
       puts "[6/8] CC1101 register readback passed"
 
       validate_came_config("toggle-light", config.toggle_light, config.code_bits)
