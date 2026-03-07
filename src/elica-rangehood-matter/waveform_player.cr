@@ -17,7 +17,7 @@ class WavePlayer
   end
 
   DEFAULT_SYMBOL_US = 333_u32
-  MAX_PACKET_BYTES  =     64
+  MAX_PACKET_BYTES  =      64
 
   getter polarity : Polarity
   getter bit_order : BitOrder

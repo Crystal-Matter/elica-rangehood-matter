@@ -7,6 +7,8 @@ module Elica::Rangehood::Actuator
   abstract def fan_up : Nil
   abstract def fan_down : Nil
   abstract def fan_off : Nil
+  abstract def fan_up(steps : Int32) : Nil
+  abstract def fan_down(steps : Int32) : Nil
 end
 
 class Elica::Rangehood::Control
@@ -44,6 +46,10 @@ class Elica::Rangehood::Control
     @fan_off = CAME::Frame.new(fan_off_hex, @code_bits)
   end
 
+  # Minimum delay between consecutive RF commands so the rangehood
+  # has time to process each one before the next arrives.
+  INTER_COMMAND_DELAY = 250.milliseconds
+
   def toggle_light : Nil
     transmit_frame("toggle_light", @toggle_light)
   end
@@ -58,6 +64,20 @@ class Elica::Rangehood::Control
 
   def fan_off : Nil
     transmit_frame("fan_off", @fan_off)
+  end
+
+  def fan_up(steps : Int32) : Nil
+    steps.times do |i|
+      sleep INTER_COMMAND_DELAY if i > 0
+      fan_up
+    end
+  end
+
+  def fan_down(steps : Int32) : Nil
+    steps.times do |i|
+      sleep INTER_COMMAND_DELAY if i > 0
+      fan_down
+    end
   end
 
   def perform(action : String) : Nil

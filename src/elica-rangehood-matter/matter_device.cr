@@ -239,8 +239,10 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
   private def handle_fan_percent_change(new_percent : Int32) : Nil
     return if @suppress_callbacks.get
 
+    Log.info { "fan percent change: new_percent=#{new_percent} current_step=#{@state.fan_step}" }
     @state_lock.synchronize do
       @state.fan_percent = new_percent
+      Log.info { "fan percent applied: step=#{@state.fan_step} percent=#{@state.fan_percent}" }
       sync_clusters_from_state
     end
   rescue ex
@@ -251,6 +253,7 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
   private def handle_fan_mode_change(new_mode : Matter::Cluster::FanControlCluster::FanMode) : Nil
     return if @suppress_callbacks.get
 
+    Log.info { "fan mode change: new_mode=#{new_mode} current_step=#{@state.fan_step}" }
     target_step = case new_mode
                   when .off?
                     0

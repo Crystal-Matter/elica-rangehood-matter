@@ -20,6 +20,14 @@ private class FakeActuator
   def fan_off : Nil
     @calls << "fan_off"
   end
+
+  def fan_up(steps : Int32) : Nil
+    steps.times { fan_up }
+  end
+
+  def fan_down(steps : Int32) : Nil
+    steps.times { fan_down }
+  end
 end
 
 describe Elica::Rangehood::StateMachine do

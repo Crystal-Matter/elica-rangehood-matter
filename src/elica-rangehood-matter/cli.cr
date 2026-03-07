@@ -29,7 +29,7 @@ class Elica::Rangehood::CLI
 
     def initialize
       @spi_device = env_string("SPI_DEVICE", "/dev/spidev0.0")
-      @spi_speed_hz = env_u32("SPI_SPEED_HZ", 50_000_u32)
+      @spi_speed_hz = env_u32("SPI_SPEED_HZ", 500_000_u32)
       @rf_frequency_hz = env_u32("RF_FREQUENCY_HZ", CC1101::DEFAULT_FREQUENCY_HZ)
       @rf_symbol_us = env_u32("RF_SYMBOL_US", WavePlayer::DEFAULT_SYMBOL_US)
       @rf_bit_order = env_bit_order("RF_BIT_ORDER", BitOrderSetting::Msb)
@@ -257,6 +257,8 @@ class Elica::Rangehood::CLI
       assert_register(radio, CC1101::MCSM1, 0x30_u8, "MCSM1")
       assert_register(radio, CC1101::FREND0, 0x11_u8, "FREND0")
       assert_register(radio, CC1101::DEVIATN, 0x00_u8, "DEVIATN")
+      assert_register(radio, CC1101::IOCFG2, 0x06_u8, "IOCFG2")
+      assert_register(radio, CC1101::IOCFG0, 0x06_u8, "IOCFG0")
       puts "[6/8] CC1101 register readback passed"
 
       validate_came_config("toggle-light", config.toggle_light, config.code_bits)
@@ -265,26 +267,44 @@ class Elica::Rangehood::CLI
       validate_came_config("fan-off", config.fan_off, config.code_bits)
       puts "[7/8] CAME frame parsing/encoding passed"
 
+      # --- FIFO write verification ---
+      # Write a test pattern and read back TXBYTES to confirm data reaches the FIFO
+      radio.idle
+      radio.strobe(CC1101::SFTX)
+      test_data = Bytes.new(8, 0xFF_u8)
+      radio.write_reg(CC1101::PKTLEN, 8_u8)
+      radio.write_burst(0x3F_u8, test_data)
+      txbytes = radio.read_reg(CC1101::TXBYTES) & 0x7F
+      puts "       TX FIFO after burst write: #{txbytes} bytes (expected 8)"
+      raise "TX FIFO empty after burst write — SPI burst transfers not working!" if txbytes == 0
+      radio.strobe(CC1101::SFTX) # flush for next test
+
+      # OOK modulation diagnostic: three distinctive test patterns
+      # with long gaps between them so they're easy to identify on Flipper.
+      puts "       [A] Sending 0xFF x64 (all ON) — expect ~170ms carrier..."
+      radio.transmit(Bytes.new(64, 0xFF_u8))
+      sleep 500.milliseconds
+
+      puts "       [B] Sending 0x00 (all OFF) — expect SILENCE..."
+      radio.transmit(Bytes.new(1, 0x00_u8))
+      sleep 500.milliseconds
+
+      puts "       [C] Sending 0xAA x8 (alternating) — expect 333µs square wave..."
+      radio.transmit(Bytes.new(8, 0xAA_u8))
+      sleep 500.milliseconds
+
+      # Send actual CAME toggle-light frame
+      puts "       [D] Sending CAME toggle-light frame..."
       wave_player = WavePlayer.new(
         radio,
         waveform_polarity(config),
         waveform_bit_order(config),
         config.rf_symbol_us
       )
-
-      # Send a square wave test pattern: alternating 0xAA bytes = alternating ON/OFF
-      # at the configured data rate. Easy to verify on Flipper:
-      # expect equal-length ON/OFF pulses of symbol_us duration.
-      puts "       Sending square wave test (0xAA * 8 bytes)..."
-      square_wave = Bytes.new(8, 0xAA_u8)
-      radio.transmit(square_wave)
-      sleep 50.milliseconds
-
-      # Send actual CAME toggle-light frame
-      puts "       Sending CAME toggle-light frame..."
       frame = CAME::Frame.new(config.toggle_light, config.code_bits)
       wave_player.play(frame.pulses, 1)
-      puts "[8/8] RF test packets sent (square wave + CAME frame)"
+
+      puts "[8/8] OOK diagnostic packets sent (A=0xFF, B=0x00, C=0xAA, D=CAME)"
 
       elapsed_ms = (Time.instant - started_at).total_milliseconds
       puts ""

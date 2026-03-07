@@ -22,6 +22,7 @@ class CC1101
 
   # Configuration registers
   IOCFG2   = 0x00_u8
+  IOCFG1   = 0x01_u8
   IOCFG0   = 0x02_u8
   FIFOTHR  = 0x03_u8
   PKTLEN   = 0x06_u8
@@ -54,10 +55,11 @@ class CC1101
   # Special addresses
   PATABLE = 0x3E_u8
 
-  # Status register (read via burst bit)
+  # Status registers (read via burst bit: addr | 0xC0)
   PARTNUM   = 0xF0_u8
   VERSION   = 0xF1_u8
-  MARCSTATE = 0xF5_u8 # 0xC0 (status) | 0x35
+  MARCSTATE = 0xF5_u8 # 0xC0 | 0x35
+  TXBYTES   = 0xFA_u8 # 0xC0 | 0x3A
 
   EXPECTED_PARTNUM     =         0x00_u8
   DEFAULT_FREQUENCY_HZ = 433_920_000_u32
@@ -93,23 +95,47 @@ class CC1101
     @spi.transfer(buf)
   end
 
+  def read_burst(addr : UInt8, length : Int32) : Bytes
+    buf = Bytes.new(length + 1)
+    buf[0] = addr | 0xC0_u8 # read + burst flags
+    rx = @spi.transfer(buf)
+    rx[1, length]
+  end
+
   def reset
-    # Toggle CS to signal the CC1101 (reference driver does this before SRES)
-    @spi.transfer(Bytes[0x00])
-    sleep 1.milliseconds
+    # Retry reset sequence — SPI with jumper wires can be flaky
+    5.times do |attempt|
+      # Toggle CS to signal the CC1101 (reference driver does this before SRES)
+      @spi.transfer(Bytes[0x00])
+      sleep 1.milliseconds
 
-    strobe(SRES)
-    sleep 10.milliseconds
+      strobe(SRES)
+      sleep 10.milliseconds
 
-    # Flush both FIFOs after reset
-    strobe(SFTX)
-    strobe(SFRX)
-    sleep 1.milliseconds
+      # Flush both FIFOs after reset
+      strobe(SFTX)
+      strobe(SFRX)
+      sleep 1.milliseconds
 
-    # Verify chip is alive: VERSION must be non-zero (typically 0x14)
-    ver = version
-    Log.info { "cc1101 reset complete version=0x#{ver.to_s(16).upcase.rjust(2, '0')}" }
-    raise "CC1101 not responding after reset (VERSION=0x00, check SPI wiring)" if ver == 0
+      # Verify chip is alive: VERSION must be non-zero (typically 0x14)
+      # Read VERSION multiple times to handle flaky reads
+      ver = 0_u8
+      3.times do
+        ver = version
+        break if ver != 0
+        sleep 1.milliseconds
+      end
+
+      if ver != 0
+        Log.info { "cc1101 reset complete version=0x#{ver.to_s(16).upcase.rjust(2, '0')} attempt=#{attempt + 1}" }
+        return
+      end
+
+      Log.warn { "cc1101 reset attempt #{attempt + 1}: VERSION=0x00, retrying..." }
+      sleep 50.milliseconds
+    end
+
+    raise "CC1101 not responding after reset (VERSION=0x00, check SPI wiring and power)"
   end
 
   def idle
@@ -137,15 +163,13 @@ class CC1101
   # Configure OOK transmission at the requested carrier frequency and symbol timing.
   # Each FIFO bit maps to one symbol of approximately `symbol_us` microseconds.
   #
-  # This sets ALL registers needed for reliable OOK TX, matching the approach
-  # used by proven reference drivers (mengguang/cc1101-raspberrypi).
+  # Every register write is individually verified and retried to handle SPI
+  # signal integrity issues common with jumper-wire connections.
   def configure_ook(
     frequency_hz : UInt32 = DEFAULT_FREQUENCY_HZ,
     symbol_us : UInt32 = DEFAULT_SYMBOL_US,
   )
     raise "symbol_us must be >= 1" if symbol_us == 0
-
-    idle
 
     freq_word = frequency_word(frequency_hz)
     freq2 = ((freq_word >> 16) & 0xFF).to_u8
@@ -153,60 +177,55 @@ class CC1101
     freq0 = (freq_word & 0xFF).to_u8
     mdmcfg4, mdmcfg3, actual_baud = data_rate_register_values(symbol_us)
 
-    # --- GDO pins ---
-    write_reg(IOCFG2, 0x29_u8)  # GDO2: CHIP_RDYn (default)
-    write_reg(IOCFG0, 0x06_u8)  # GDO0: asserts on sync/end-of-packet
+    # Build register map: address → value
+    config = {
+      IOCFG2   => 0x06_u8, # GDO2: sync/EOP (reference OOK default)
+      IOCFG1   => 0x2E_u8, # GDO1: high impedance (tri-state)
+      IOCFG0   => 0x06_u8, # GDO0: sync/EOP
+      FIFOTHR  => 0x07_u8, # TX FIFO threshold: 33 bytes
+      PKTCTRL1 => 0x00_u8, # No append status, no address check
+      PKTCTRL0 => 0x00_u8, # Fixed length, no CRC, no whitening
+      FSCTRL1  => 0x06_u8, # IF frequency
+      FSCTRL0  => 0x00_u8, # Frequency offset
+      FREQ2    => freq2,
+      FREQ1    => freq1,
+      FREQ0    => freq0,
+      MDMCFG4  => mdmcfg4, # Channel BW + data rate exponent
+      MDMCFG3  => mdmcfg3, # Data rate mantissa
+      MDMCFG2  => 0x30_u8, # ASK/OOK, no sync word
+      MDMCFG1  => 0x00_u8, # No FEC, 0 preamble bytes
+      MDMCFG0  => 0xF8_u8, # Channel spacing (default)
+      DEVIATN  => 0x00_u8, # Not used for OOK
+      MCSM1    => 0x30_u8, # CCA always, TX→IDLE after packet
+      MCSM0    => 0x18_u8, # Auto-calibrate on IDLE→RX/TX transition
+      FOCCFG   => 0x16_u8, # Frequency offset compensation
+      AGCCTRL2 => 0x43_u8, # AGC
+      AGCCTRL1 => 0x40_u8,
+      AGCCTRL0 => 0x91_u8,
+      FREND1   => 0x56_u8, # RX front-end (default)
+      FREND0   => 0x11_u8, # TX OOK: PA_POWER=1 (PATABLE[1] for logic '1')
+      FSCAL3   => 0xE9_u8, # Frequency synthesizer cal
+      FSCAL2   => 0x2A_u8,
+      FSCAL1   => 0x00_u8,
+      FSCAL0   => 0x1F_u8,
+    }
 
-    # --- FIFO threshold ---
-    write_reg(FIFOTHR, 0x07_u8) # TX FIFO threshold: 33 bytes
+    idle
 
-    # --- Packet engine ---
-    write_reg(PKTCTRL1, 0x00_u8) # No append status, no address check
-    write_reg(PKTCTRL0, 0x00_u8) # Fixed length, no CRC, no whitening
+    # Write each register with individual verify+retry.
+    # SPI signal integrity with jumper wires can cause random bit errors;
+    # retrying individual writes is much faster than retrying the whole sequence.
+    config.each do |addr, value|
+      write_verified(addr, value)
+    end
 
-    # --- Frequency synthesizer ---
-    write_reg(FSCTRL1, 0x06_u8) # IF frequency
-    write_reg(FSCTRL0, 0x00_u8) # Frequency offset
+    Log.info { "cc1101 all #{config.size} config registers written and verified" }
 
-    # --- Carrier frequency ---
-    write_reg(FREQ2, freq2)
-    write_reg(FREQ1, freq1)
-    write_reg(FREQ0, freq0)
-
-    # --- Modem configuration ---
-    write_reg(MDMCFG4, mdmcfg4)            # Channel BW + data rate exponent
-    write_reg(MDMCFG3, mdmcfg3)            # Data rate mantissa
-    write_reg(MDMCFG2, 0x30_u8)            # ASK/OOK, no sync word
-    write_reg(MDMCFG1, 0x00_u8)            # No FEC, 0 preamble bytes
-    write_reg(MDMCFG0, 0xF8_u8)            # Channel spacing (default)
-
-    # --- Deviation (not used for OOK but set explicitly) ---
-    write_reg(DEVIATN, 0x00_u8)
-
-    # --- Main radio control state machine ---
-    write_reg(MCSM1, 0x30_u8)   # CCA always, TX→IDLE after packet
-    write_reg(MCSM0, 0x18_u8)   # Auto-calibrate on IDLE→RX/TX transition
-
-    # --- Frequency offset compensation (RX, but set for completeness) ---
-    write_reg(FOCCFG, 0x16_u8)
-
-    # --- AGC (RX, but set explicitly to known values) ---
-    write_reg(AGCCTRL2, 0x43_u8)
-    write_reg(AGCCTRL1, 0x40_u8)
-    write_reg(AGCCTRL0, 0x91_u8)
-
-    # --- Front-end configuration ---
-    write_reg(FREND1, 0x56_u8)  # RX front-end (default)
-    write_reg(FREND0, 0x11_u8)  # TX OOK: use PA_POWER index 1
-
-    # --- Frequency synthesizer calibration ---
-    write_reg(FSCAL3, 0xE9_u8)
-    write_reg(FSCAL2, 0x2A_u8)
-    write_reg(FSCAL1, 0x00_u8)
-    write_reg(FSCAL0, 0x1F_u8)
-
-    # --- PA table: index 0 = off (0x00), index 1 = max power (0xC0, ~10 dBm) ---
-    write_burst(PATABLE, Bytes[0x00_u8, 0xC0_u8])
+    # --- PA table (burst write required for OOK modulation) ---
+    # OOK: logic '0' uses PATABLE[0], logic '1' uses PATABLE[PA_POWER=1].
+    # PATABLE[0]=0x00 (PA off for '0'), PATABLE[1]=0xC0 (max power for '1').
+    # Burst write needed to reach index 1. Retry if verification fails.
+    write_patable(Bytes[0x00_u8, 0xC0_u8])
 
     Log.info do
       symbol_rate = 1_000_000.0 / symbol_us
@@ -215,24 +234,55 @@ class CC1101
       "mdmcfg4=0x#{hex8(mdmcfg4)} mdmcfg3=0x#{hex8(mdmcfg3)}"
     end
 
-    # Verify critical registers were written correctly
-    verify_register(MDMCFG4, mdmcfg4, "MDMCFG4")
-    verify_register(MDMCFG3, mdmcfg3, "MDMCFG3")
-    verify_register(MDMCFG2, 0x30_u8, "MDMCFG2")
-    verify_register(MDMCFG1, 0x00_u8, "MDMCFG1")
-    verify_register(PKTCTRL0, 0x00_u8, "PKTCTRL0")
-    verify_register(FREND0, 0x11_u8, "FREND0")
-    verify_register(MCSM0, 0x18_u8, "MCSM0")
-
-    # Dump all config registers for diagnostics
     dump_registers
 
+    # Calibrate and wait for IDLE
     strobe(SCAL)
     500.times do
       return if state == MARCSTATE_IDLE
       sleep 100.microseconds
     end
     raise "CC1101 calibration timeout"
+  end
+
+  # Write a register with readback verification and retry.
+  # Retries up to 10 times with increasing delays to handle SPI bit errors.
+  private def write_verified(addr : UInt8, value : UInt8)
+    10.times do |attempt|
+      write_reg(addr, value)
+      sleep 100.microseconds
+      actual = read_reg(addr)
+      return if actual == value
+
+      Log.warn { "cc1101 write_verified 0x#{hex8(addr)}=0x#{hex8(value)} readback=0x#{hex8(actual)} attempt=#{attempt + 1}" }
+      sleep (1 + attempt).milliseconds # increasing backoff
+    end
+
+    actual = read_reg(addr)
+    raise "CC1101 register 0x#{hex8(addr)} write failed after 10 attempts: expected 0x#{hex8(value)}, got 0x#{hex8(actual)}"
+  end
+
+  # Write PATABLE entries via burst write with readback verification.
+  # Retries up to 10 times since burst writes can be flaky over jumper wires.
+  private def write_patable(data : Bytes)
+    10.times do |attempt|
+      write_burst(PATABLE, data)
+      sleep 100.microseconds
+      readback = read_burst(PATABLE, data.size)
+
+      if readback == data
+        hex = data.map { |byte| "0x#{hex8(byte)}" }.join(' ')
+        Log.info { "cc1101 PATABLE written and verified: #{hex}" }
+        return
+      end
+
+      hex_expected = data.map { |byte| "0x#{hex8(byte)}" }.join(' ')
+      hex_actual = readback.map { |byte| "0x#{hex8(byte)}" }.join(' ')
+      Log.warn { "cc1101 PATABLE write attempt #{attempt + 1}: expected [#{hex_expected}] got [#{hex_actual}]" }
+      sleep (1 + attempt).milliseconds
+    end
+
+    raise "CC1101 PATABLE write failed after 10 attempts"
   end
 
   # Read back and verify a register value matches expected
@@ -247,7 +297,7 @@ class CC1101
   # Log all critical register values for remote debugging
   def dump_registers
     regs = {
-      "IOCFG2" => IOCFG2, "IOCFG0" => IOCFG0, "FIFOTHR" => FIFOTHR,
+      "IOCFG2" => IOCFG2, "IOCFG1" => IOCFG1, "IOCFG0" => IOCFG0, "FIFOTHR" => FIFOTHR,
       "PKTLEN" => PKTLEN, "PKTCTRL1" => PKTCTRL1, "PKTCTRL0" => PKTCTRL0,
       "FSCTRL1" => FSCTRL1, "FSCTRL0" => FSCTRL0,
       "FREQ2" => FREQ2, "FREQ1" => FREQ1, "FREQ0" => FREQ0,
@@ -301,21 +351,43 @@ class CC1101
     raise "TX data too large: #{data.size} bytes (max 64)" if data.size > 64
 
     Log.debug {
-      hex = data.map { |b| b.to_s(16).upcase.rjust(2, '0') }.join(' ')
+      hex = data.map(&.to_s(16).upcase.rjust(2, '0')).join(' ')
       "cc1101 tx start bytes=#{data.size} data=#{hex}"
     }
 
     idle
     strobe(SFTX)
 
-    write_reg(PKTLEN, data.size.to_u8)
+    write_verified(PKTLEN, data.size.to_u8)
+
+    # Write data to TX FIFO — try burst first, fall back to single-byte writes
     write_burst(0x3F_u8, data)
+
+    txbytes = read_reg(TXBYTES) & 0x7F
+    if txbytes != data.size
+      Log.warn { "cc1101 tx fifo burst write incomplete: txbytes=#{txbytes} expected=#{data.size}, retrying with single-byte writes" }
+      strobe(SFTX) # flush and retry
+      data.each do |byte|
+        write_reg(0x3F_u8, byte)
+      end
+      txbytes = read_reg(TXBYTES) & 0x7F
+      Log.debug { "cc1101 tx fifo after single-byte writes: txbytes=#{txbytes} expected=#{data.size}" }
+      raise "TX FIFO write failed: txbytes=#{txbytes} expected=#{data.size}" if txbytes != data.size
+    else
+      Log.debug { "cc1101 tx fifo burst write ok: txbytes=#{txbytes}" }
+    end
 
     strobe(STX)
 
+    # Calculate timeout: each byte = 8 bits at symbol_us per bit, plus margin.
+    # At 3000 baud, 64 bytes = 170ms. Use 2x expected time + 100ms safety.
+    # Default: assume worst case of ~3ms per byte (8 bits × 333µs).
+    expected_ms = (data.size * 8 * 0.333) + 100
+    poll_count = (expected_ms / 0.2).to_i.clamp(500, 10_000)
+
     completed = false
     saw_non_idle_state = false
-    500.times do
+    poll_count.times do
       sleep 200.microseconds
       current = state
       if current == MARCSTATE_IDLE

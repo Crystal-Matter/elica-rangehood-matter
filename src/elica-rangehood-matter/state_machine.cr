@@ -1,4 +1,8 @@
+require "log"
+
 class Elica::Rangehood::StateMachine
+  Log = ::Log.for("elica_rangehood.state_machine")
+
   getter? light_on : Bool
   getter fan_step : Int32
   getter fan_last_non_zero_step : Int32
@@ -33,7 +37,9 @@ class Elica::Rangehood::StateMachine
   end
 
   def fan_percent=(percent : Int32) : Nil
-    self.fan_step = percent_to_step(percent)
+    step = percent_to_step(percent)
+    Log.info { "fan_percent=#{percent} -> step=#{step} (current=#{@fan_step})" }
+    self.fan_step = step
   end
 
   def fan_step=(step : Int32) : Nil
@@ -41,6 +47,7 @@ class Elica::Rangehood::StateMachine
     return if target == @fan_step
 
     if target == 0
+      Log.info { "fan_step #{@fan_step} -> 0 (fan_off)" }
       @actuator.fan_off if @fan_step > 0
       @fan_step = 0
       return
@@ -48,9 +55,11 @@ class Elica::Rangehood::StateMachine
 
     delta = target - @fan_step
     if delta > 0
-      delta.times { @actuator.fan_up }
+      Log.info { "fan_step #{@fan_step} -> #{target} (fan_up x#{delta})" }
+      @actuator.fan_up(delta)
     else
-      (-delta).times { @actuator.fan_down }
+      Log.info { "fan_step #{@fan_step} -> #{target} (fan_down x#{-delta})" }
+      @actuator.fan_down(-delta)
     end
 
     @fan_step = target

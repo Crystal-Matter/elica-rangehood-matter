@@ -1,3 +1,5 @@
+require "log"
+
 # Linux SPI ioctl interface
 lib LibC
   fun ioctl(fd : Int32, request : UInt64, argp : Void*) : Int32
@@ -37,12 +39,13 @@ end
 # SPI device wrapper
 class SpiDevice
   include SpiTransport
+  Log = ::Log.for("elica_rangehood.spi")
 
   @fd : Int32
   @speed : UInt32
   @io : File
 
-  def initialize(device : String = "/dev/spidev0.0", @speed : UInt32 = 50_000_u32)
+  def initialize(device : String = "/dev/spidev0.0", @speed : UInt32 = 500_000_u32)
     @io = File.open(device, "r+")
     @fd = @io.fd
 
@@ -85,6 +88,9 @@ class SpiDevice
 
     rc = LibC.ioctl(@fd, LinuxSPI::SPI_IOC_MESSAGE_1, pointerof(xfer).as(Void*))
     raise "SPI transfer failed (ioctl returned #{rc})" if rc < 0
+    if rc != tx.size
+      Log.warn { "SPI transfer size mismatch: sent=#{tx.size} ioctl_returned=#{rc}" }
+    end
     rx
   end
 end

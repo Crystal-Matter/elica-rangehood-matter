@@ -20,6 +20,14 @@ private class FakeMatterActuator
   def fan_off : Nil
     @calls << "fan_off"
   end
+
+  def fan_up(steps : Int32) : Nil
+    steps.times { fan_up }
+  end
+
+  def fan_down(steps : Int32) : Nil
+    steps.times { fan_down }
+  end
 end
 
 private def build_device(actuator : FakeMatterActuator, storage_file : String) : Elica::Rangehood::MatterDevice

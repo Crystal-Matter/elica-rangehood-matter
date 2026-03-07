@@ -6,3 +6,9 @@ require "../src/elica-rangehood-matter/waveform_player"
 require "../src/elica-rangehood-matter/rangehood_control"
 require "../src/elica-rangehood-matter/state_machine"
 require "../src/elica-rangehood-matter/matter_device"
+
+::Log.setup("*", :trace)
+
+Spec.before_suite do
+  ::Log.setup("*", :trace)
+end
