@@ -8,6 +8,7 @@ It transmits OOK/ASK RF packets through a CC1101 connected to Raspberry Pi SPI a
 - Raspberry Pi 5
 - CC1101 transceiver module (433MHz variant recommended)
 - Compatible Elica range hood that uses the matching remote protocol (you can capture codes for your device using a flipper zero)
+- I use this [PCB adapter](https://securipi.co.uk/cc1101.pdf) - available [on ebay](https://www.ebay.co.uk/itm/135176300449)
 
 ## Wiring (example)
 
@@ -15,8 +16,8 @@ Example wiring for CC1101 on Raspberry Pi SPI0 (`/dev/spidev0.0`):
 
 | Signal | CC1101 pin | Raspberry Pi pin |
 |---|---|---|
-| Ground | 1 `GND` | `GND` (physical pin `6`) |
-| Power | 2 `VCC` | `3.3V` (physical pin `1`) |
+| Ground | 1 `GND` | `GND` (physical pin `20`) |
+| Power | 2 `VCC` | `3.3V` (physical pin `17`) |
 | Optional GPIO | 3 `GDO0` | `GPIO25` (physical pin `22`) |
 | Chip Select | 4 `CSN` | `GPIO8` (CE0, physical pin `24`) |
 | SPI Clock | 5 `SCK` | `GPIO11` (SCLK, physical pin `23`) |

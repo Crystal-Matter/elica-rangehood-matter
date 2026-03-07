@@ -105,11 +105,14 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
       fan_mode: Matter::Cluster::FanControlCluster::FanMode::Off,
       fan_mode_sequence: Matter::Cluster::FanControlCluster::FanModeSequence::OffLowMedHigh,
       percent_setting: 0_u8,
-      percent_current: 0_u8
+      percent_current: 0_u8,
+      speed_max: 4_u8,
+      feature_map: Matter::Cluster::FanControlCluster::Feature::Step
     )
     fan_on_off_cluster.on_state_changed { |state| handle_fan_on_off(state) }
-    fan_control_cluster.on_percent_changed { |_old_percent, new_percent| handle_fan_percent_change(new_percent.to_i) }
+    fan_control_cluster.on_percent_changed { |old_percent, new_percent| handle_fan_percent_change(old_percent, new_percent.to_i) }
     fan_control_cluster.on_fan_mode_changed { |_old_mode, new_mode| handle_fan_mode_change(new_mode) }
+    fan_control_cluster.on_speed_changed { |old_speed, new_speed| Log.info { "fan speed changed: #{old_speed} -> #{new_speed}" } }
 
     clusters.concat(
       [
@@ -227,6 +230,7 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
   private def handle_fan_on_off(new_state : Bool) : Nil
     return if @suppress_callbacks.get
 
+    Log.info { "fan on/off change: new_state=#{new_state} current_step=#{@state.fan_step} last_non_zero=#{@state.fan_last_non_zero_step}" }
     @state_lock.synchronize do
       @state.fan_on = new_state
       sync_clusters_from_state
@@ -236,10 +240,13 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
     @state_lock.synchronize { sync_clusters_from_state }
   end
 
-  private def handle_fan_percent_change(new_percent : Int32) : Nil
-    return if @suppress_callbacks.get
+  private def handle_fan_percent_change(old_percent : UInt8?, new_percent : Int32) : Nil
+    if @suppress_callbacks.get
+      Log.debug { "fan percent change suppressed: #{old_percent} -> #{new_percent}" }
+      return
+    end
 
-    Log.info { "fan percent change: new_percent=#{new_percent} current_step=#{@state.fan_step}" }
+    Log.info { "fan percent change: #{old_percent} -> #{new_percent} current_step=#{@state.fan_step}" }
     @state_lock.synchronize do
       @state.fan_percent = new_percent
       Log.info { "fan percent applied: step=#{@state.fan_step} percent=#{@state.fan_percent}" }
@@ -251,7 +258,10 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
   end
 
   private def handle_fan_mode_change(new_mode : Matter::Cluster::FanControlCluster::FanMode) : Nil
-    return if @suppress_callbacks.get
+    if @suppress_callbacks.get
+      Log.debug { "fan mode change suppressed: #{new_mode}" }
+      return
+    end
 
     Log.info { "fan mode change: new_mode=#{new_mode} current_step=#{@state.fan_step}" }
     target_step = case new_mode
@@ -294,6 +304,10 @@ class Elica::Rangehood::MatterDevice < Matter::Device::Base
       desired_percent = @state.fan_percent.to_u8
       fan_control_cluster.percent_setting = desired_percent
       fan_control_cluster.update_percent_current(desired_percent)
+      # Sync speed from percent (speed_max steps mapped to 0-100%)
+      desired_speed = (desired_percent.to_f / 100.0 * fan_control_cluster.speed_max).round.to_u8
+      fan_control_cluster.speed_setting = desired_speed
+      fan_control_cluster.speed_current = desired_speed
       fan_control_cluster.fan_mode = fan_mode_for_step(@state.fan_step)
     end
   end
