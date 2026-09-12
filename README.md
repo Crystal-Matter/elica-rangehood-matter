@@ -136,7 +136,15 @@ Environment variables:
 - `FAN_UP` (default: `00 00 00 00 00 01 FE 97`)
 - `FAN_DOWN` (default: `00 00 00 00 00 01 FE 90`)
 - `FAN_OFF` (default: `00 00 00 00 00 01 FE 95`)
-- `MATTER_STORAGE_FILE` (default: `data/elica_rangehood_matter_storage.json`)
+- `MATTER_STORAGE_FILE` (default: `data/elica_rangehood_matter_storage.yml`)
+
+  Matter 0.2 changed the storage format. Convert a device commissioned by an earlier build once,
+  offline, and it stays paired:
+
+  ```shell
+  bin/matter-storage migrate --from legacy:data/elica_rangehood_matter_storage.json \
+                             --to yaml:data/elica_rangehood_matter_storage.yml
+  ```
 - `LOG_LEVEL` (default: `info`)
 - `INVERT_WAVEFORM` (default: `false`)
 
@@ -175,7 +183,7 @@ docker run --rm \
   --network host \
   --device /dev/spidev0.0:/dev/spidev0.0 \
   -v "$(pwd)/data:/data" \
-  -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.json \
+  -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.yml \
   elica-rangehood-matter
 ```
 
@@ -186,7 +194,7 @@ docker run --rm \
   --network host \
   --device /dev/spidev0.0:/dev/spidev0.0 \
   -v "$(pwd)/data:/data" \
-  -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.json \
+  -e MATTER_STORAGE_FILE=/data/elica_rangehood_matter_storage.yml \
   -e LOG_LEVEL=debug \
   elica-rangehood-matter --hardware-test
 ```
